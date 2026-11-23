@@ -1,0 +1,17 @@
+# Windows 系统垃圾
+Thumbs.db
+desktop.ini
+
+# 编辑器临时文件
+*.bak
+*.tmp
+*.orig
+*.swp
+*~
+.vscode/
+.idea/
+
+# 打包产物（zip 等不要进仓库）
+*.zip
+*.rar
+*.7z
