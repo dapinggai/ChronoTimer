@@ -1,7 +1,7 @@
 ## Interface: 11200
 ## Title: |cff33ffcc[辅助]|r ChronoTimer 光环计时
 ## Title-zhCN: |cff33ffcc[辅助]|r ChronoTimer 光环计时
-## Notes: Refactored from Chronometer (original by Bhattu) for Turtle WoW - shows your own auras, multi-target HoTs/DoTs and shared Fire Vulnerability (requires Nampower)
+## Notes: Refactored from Chronometer (original by Bhattu) for Turtle WoW; UI based on Chronometer. Shows your own auras, totems, multi-target HoTs/DoTs and shared Fire Vulnerability (requires Nampower)
 ## Notes-zhCN: Chronometer 重构版（原作者 Bhattu，后续修复 laytya、dein0s、武藤纯子酱、Sunelegy）：显示自身 Buff / Debuff、图腾、多目标 HoT / DoT 与团队共享火焰易伤，界面沿用 Chronometer（需 Nampower）
 ## Version: 1.6.24
 ## Author: 灵灵漆
