@@ -13,7 +13,22 @@ local COMBO_COLORS = {
     { 0.25, 1.00, 0.35 },  -- 亮绿
 }
 
-local BAR_TEX = "Interface\\TargetingFrame\\UI-StatusBar"
+-- 默认材质（暴雪标准条）；可在设置中选择与计时条相同的其它材质
+local DEFAULT_BAR_TEX = "Interface\\TargetingFrame\\UI-StatusBar"
+
+-- 连击点图形样式贴图（白色填充，靠顶点着色上色；外圈用同一张图放大后染黑做描边）
+local TEX_DIAMOND = "Interface\\AddOns\\ChronoTimer\\Textures\\combo_diamond"
+local TEX_CIRCLE  = "Interface\\AddOns\\ChronoTimer\\Textures\\combo_circle"
+local TEX_SQUARE  = "Interface\\Buttons\\WHITE8X8"
+
+local function BarTexture()
+    local p = ChronoTimerDB and ChronoTimerDB.profile or {}
+    local name = p.energyTex
+    if name and name ~= "" and ChronoTimer_TexturePath then
+        return ChronoTimer_TexturePath(name)
+    end
+    return DEFAULT_BAR_TEX
+end
 
 local function Print(msg)
     DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc[ChronoTimer]|r " .. tostring(msg))
@@ -49,7 +64,7 @@ frame.unlocked = false
 
 -- 能量条（普通黄色）
 local bar = CreateFrame("StatusBar", nil, frame)
-bar:SetStatusBarTexture(BAR_TEX)
+bar:SetStatusBarTexture(BarTexture())
 bar:SetStatusBarColor(1, 0.82, 0.1)
 bar:SetMinMaxValues(0, 100)
 bar:SetValue(0)
@@ -91,22 +106,33 @@ for i = 1, COMBO_MAX do
 
     local tex = seg:CreateTexture(nil, "ARTWORK")
     tex:SetAllPoints(seg)
-    tex:SetTexture(BAR_TEX)
+    tex:SetTexture(BarTexture())
+    seg.tex = tex
+    seg.border = border
     local c = COMBO_COLORS[i]
     tex:SetVertexColor(c[1], c[2], c[3])
     seg:Hide()
     frame.dots[i] = seg
 end
 
--- 按设置重新排版：能量条宽高、连击点高度与间距
+-- 按设置重新排版：能量条宽高、连击点高度/间距、样式（长条 / 菱形 / 圆形）
 local function Layout()
     local p = ChronoTimerDB and ChronoTimerDB.profile or {}
     local bw = p.energyWidth or 150
     local bh = p.energyHeight or 12
     local ch = p.comboHeight or 6
     local sp = p.comboSpacing or 4
+    local style = p.comboStyle or "bar"
     local showBar   = p.showEnergyBar ~= false
     local showCombo = p.showComboPoints ~= false
+
+    local centered = style ~= "bar"
+    local fillTex
+    if style == "diamond" then fillTex = TEX_DIAMOND
+    elseif style == "circle" then fillTex = TEX_CIRCLE
+    else fillTex = TEX_SQUARE end
+    local barTexPath = BarTexture()
+    bar:SetStatusBarTexture(barTexPath)
 
     if bw < 40 then bw = 40 end
     if bh < 6  then bh = 6  end
@@ -114,11 +140,19 @@ local function Layout()
     if sp < 0  then sp = 0  end
 
     local pad  = 6
-    local segW = (bw - (COMBO_MAX - 1) * sp) / COMBO_MAX
-    if segW < 4 then segW = 4 end
+    local segW, segH
+    if centered then
+        -- 菱形 / 圆形 / 正方形保持正方形，避免拉伸；边长由「连击点高度」控制
+        segW, segH = ch, ch
+    else
+        segW = (bw - (COMBO_MAX - 1) * sp) / COMBO_MAX
+        if segW < 4 then segW = 4 end
+        segH = ch
+    end
+    local rowW = COMBO_MAX * segW + (COMBO_MAX - 1) * sp
 
     local h = pad
-    if showCombo then h = h + ch end
+    if showCombo then h = h + segH end
     if showCombo and showBar then h = h + 4 end
     if showBar then h = h + bh end
     h = h + pad
@@ -126,12 +160,28 @@ local function Layout()
     frame:SetWidth(bw + pad * 2)
     frame:SetHeight(h)
 
+    -- 长条铺满能量条宽度；图形在能量条上方居中
+    local startX = pad
+    if centered then
+        startX = pad + (bw - rowW) / 2
+        if startX < pad then startX = pad end
+    end
+
     for i = 1, COMBO_MAX do
         local d = frame.dots[i]
         d:SetWidth(segW)
-        d:SetHeight(ch)
+        d:SetHeight(segH)
         d:ClearAllPoints()
-        d:SetPoint("TOPLEFT", frame, "TOPLEFT", pad + (i - 1) * (segW + sp), -pad)
+        d:SetPoint("TOPLEFT", frame, "TOPLEFT", startX + (i - 1) * (segW + sp), -pad)
+        if style == "bar" then
+            d.tex:SetTexture(barTexPath)
+            d.border:SetTexture(0, 0, 0, 0.9)
+            d.border:SetVertexColor(1, 1, 1, 1)
+        else
+            d.tex:SetTexture(fillTex)
+            d.border:SetTexture(fillTex)
+            d.border:SetVertexColor(0, 0, 0, 1)
+        end
     end
 
     if showBar then bar:Show() else bar:Hide() end
@@ -188,6 +238,18 @@ driver:SetScript("OnUpdate", function()
     if UnitPowerType and UnitPowerType("player") ~= 3 then
         if frame:IsShown() then frame:Hide() end
         return
+    end
+
+    -- 可选：仅在战斗中显示，脱战立即隐藏并重置回能光标观测
+    if p.energyCombatOnly then
+        local inCombat = UnitAffectingCombat and UnitAffectingCombat("player")
+        if inCombat == nil and InCombatLockdown then inCombat = InCombatLockdown() end
+        if not inCombat then
+            if frame:IsShown() then frame:Hide() end
+            lastMana, lastTickAt = nil, nil
+            if tickVisible then tick:Hide() tickVisible = false end
+            return
+        end
     end
 
     if not frame:IsShown() then frame:Show() end

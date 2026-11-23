@@ -75,6 +75,18 @@ local function SetSkinBackground(f, alpha, br, bg, bb)
     end
 end
 
+-- 图标描边颜色：自身 Debuff 四周染红，其余保持默认深灰
+local BORDER_DEFAULT     = { 0.05, 0.05, 0.05 }
+local BORDER_SELF_DEBUFF = { 1, 0.08, 0.08 }
+
+local function SetIconBorder(f, c)
+    if f.backdrop then
+        f.backdrop:SetBackdropBorderColor(c[1], c[2], c[3], 1)
+    else
+        f:SetBackdropBorderColor(c[1], c[2], c[3], 1)
+    end
+end
+
 local function FormatTime(rem, asSeconds)
     if asSeconds then
         return tostring(math.ceil(rem))
@@ -125,6 +137,7 @@ local function CreateIconFrame(parent, size, withTarget)
     f:SetWidth(size)
     f:SetHeight(size + (withTarget and TARGET_LABEL_HEIGHT or 0))
     f.hasTarget = withTarget and true or false
+    f.size = size
     SkinFrame(f, 0.05, 0.05, 0.05)
 
     local inset = pfui and 1 or 2
@@ -178,6 +191,7 @@ local function CreateIconFrame(parent, size, withTarget)
 end
 
 local function ResizeIcon(f, size)
+    f.size = size
     f:SetWidth(size)
     f:SetHeight(size + (f.targetName and TARGET_LABEL_HEIGHT or 0))
     local inset = f.inset or 2
@@ -225,16 +239,16 @@ local function CreateCC()
 
     ccFrame.glowTop = ccFrame:CreateTexture(nil, "ARTWORK")
     ccFrame.glowTop:SetTexture(GLOW)
-    ccFrame.glowTop:SetVertexColor(1, 0.05, 0.05)
-    ccFrame.glowTop:SetBlendMode("ADD")
+    ccFrame.glowTop:SetVertexColor(1, 0, 0)
+    ccFrame.glowTop:SetBlendMode("BLEND")
     ccFrame.glowTop:SetPoint("BOTTOMLEFT", ccFrame, "TOPLEFT", 0, GAP)
     ccFrame.glowTop:SetPoint("BOTTOMRIGHT", ccFrame, "TOPRIGHT", 0, GAP)
     ccFrame.glowTop:SetHeight(GH)
 
     ccFrame.glowBottom = ccFrame:CreateTexture(nil, "ARTWORK")
     ccFrame.glowBottom:SetTexture(GLOW)
-    ccFrame.glowBottom:SetVertexColor(1, 0.05, 0.05)
-    ccFrame.glowBottom:SetBlendMode("ADD")
+    ccFrame.glowBottom:SetVertexColor(1, 0, 0)
+    ccFrame.glowBottom:SetBlendMode("BLEND")
     ccFrame.glowBottom:SetTexCoord(0, 1, 1, 0)   -- 垂直翻转，让宽边贴住图标
     ccFrame.glowBottom:SetPoint("TOPLEFT", ccFrame, "BOTTOMLEFT", 0, -GAP)
     ccFrame.glowBottom:SetPoint("TOPRIGHT", ccFrame, "BOTTOMRIGHT", 0, -GAP)
@@ -243,10 +257,10 @@ local function CreateCC()
     -- 深色背景去掉，完全透明
     --（保留一个 1x1 的 invisible texture 让 frame 的 TOPLEFT/BOTTOMRIGHT 有依附）
 
-    -- 图标（左侧）
+    -- 图标（居中，倒计时在其左、技能名在其右，整组落在泛光区域中央）
     local iconSize = 40
     ccIcon = CreateFrame("Frame", nil, ccFrame)
-    ccIcon:SetPoint("LEFT", ccFrame, "LEFT", 12, 0)
+    ccIcon:SetPoint("CENTER", ccFrame, "CENTER", 0, 0)
     ccIcon:SetWidth(iconSize)
     ccIcon:SetHeight(iconSize)
     ccIcon.icon = ccIcon:CreateTexture(nil, "ARTWORK")
@@ -261,18 +275,20 @@ local function CreateCC()
     ccIcon.stack:SetShadowOffset(1, -1)
     ccIcon.stack:SetText("")
 
-    -- 技能名称（右上）
+    -- 技能名称（图标右侧，垂直居中）
     ccFrame.title = ccFrame:CreateFontString(nil, "OVERLAY")
-    ccFrame.title:SetPoint("TOPLEFT", ccIcon, "TOPRIGHT", 8, -4)
+    ccFrame.title:SetPoint("LEFT", ccIcon, "RIGHT", 8, 0)
+    ccFrame.title:SetJustifyH("LEFT")
     ccFrame.title:SetFont(GetFontPath(), 13, "OUTLINE")
     ccFrame.title:SetTextColor(1, 1, 1, 1)
     ccFrame.title:SetShadowColor(0, 0, 0, 1)
     ccFrame.title:SetShadowOffset(1, -1)
     ccFrame.title:SetText("")
 
-    -- 剩余时间（右下）
+    -- 剩余时间（图标左侧，垂直居中）
     ccIcon.text = ccFrame:CreateFontString(nil, "OVERLAY")
-    ccIcon.text:SetPoint("TOPLEFT", ccFrame.title, "BOTTOMLEFT", 0, 2)
+    ccIcon.text:SetPoint("RIGHT", ccIcon, "LEFT", -8, 0)
+    ccIcon.text:SetJustifyH("RIGHT")
     ccIcon.text:SetFont(GetFontPath(), 16, "OUTLINE")
     ccIcon.text:SetTextColor(1, 0.9, 0.4, 1)
     ccIcon.text:SetShadowColor(0, 0, 0, 1)
@@ -286,13 +302,11 @@ local function CreateCC()
     ccFrame.label:SetText("控制类 Debuff（可拖动）")
     ccFrame.label:Hide()
 
-    -- 呼吸动画：上下柔光脉动
-    ccFrame:SetScript("OnUpdate", function()
-        local wave = 0.5 + 0.5 * math.sin(GetTime() * 3.0)
-        local alpha = 0.35 + 0.30 * wave
-        ccFrame.glowTop:SetAlpha(alpha)
-        ccFrame.glowBottom:SetAlpha(alpha)
-    end)
+    -- 泛光颜色加重到最深：纯红、完全不透明度（不再做呼吸脉动）
+    ccFrame.glowTop:SetVertexColor(1, 0, 0)
+    ccFrame.glowBottom:SetVertexColor(1, 0, 0)
+    ccFrame.glowTop:SetAlpha(1)
+    ccFrame.glowBottom:SetAlpha(1)
 
     ccFrame:SetScript("OnDragStart", function()
         if not ccUnlocked then return end
@@ -338,12 +352,6 @@ local function CreateContainer()
         this:StopMovingOrSizing()
         SavePosition(this, "iconX", "iconY")
     end)
-    container:SetScript("OnUpdate", function()
-        local now = GetTime()
-        if (now - lastUpdate) < 0.1 then return end
-        lastUpdate = now
-        IM:Update(false)
-    end)
 
     if db.iconX and db.iconY then
         container:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", db.iconX, db.iconY)
@@ -353,6 +361,21 @@ local function CreateContainer()
     container:Hide()
 end
 
+-- 独立驱动帧：条形模式下图标容器是隐藏的，挂在容器上的 OnUpdate 不会触发，
+-- 中央控制图标需要在两种显示模式下都刷新，所以单独用常驻帧驱动
+local ticker
+local function CreateTicker()
+    ticker = CreateFrame("Frame", "ChronoTimerIconTicker", UIParent)
+    ticker:SetWidth(1)
+    ticker:SetHeight(1)
+    ticker:SetScript("OnUpdate", function()
+        local now = GetTime()
+        if (now - lastUpdate) < 0.1 then return end
+        lastUpdate = now
+        IM:Update(false)
+    end)
+end
+
 function IM:Initialize(database, activeTable)
     if initialized then return end
     if not database or not activeTable then return end
@@ -360,6 +383,7 @@ function IM:Initialize(database, activeTable)
     active = activeTable
     CreateContainer()
     CreateCC()
+    CreateTicker()
     self:ApplySettings()
     self:SetEnabled(db.displayMode == "icon")
     initialized = true
@@ -395,8 +419,8 @@ function IM:SetEnabled(on)
         self:Update(true)
     else
         container:Hide()
+        -- 中央控制图标不随显示模式关闭（「中央控制图标」关闭时由 Update 隐藏）
         if ccFrame then
-            ccFrame:Hide()
             ccUnlocked = false
             ccFrame:EnableMouse(false)
             ccFrame.label:Hide()
@@ -433,8 +457,8 @@ end
 
 function IM:ToggleCCUnlock()
     if not ccFrame then return end
-    if not enabled then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc[ChronoTimer]|r 请先开启「使用图标显示」")
+    if not enabled and not db.ccCenter then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc[ChronoTimer]|r 请先开启「使用图标显示」或「中央控制图标」")
         return
     end
     ccUnlocked = not ccUnlocked
@@ -486,6 +510,14 @@ local function TrySkinPfUI()
     Reskin(container, 0.3, 1, 0.9)
     SetSkinBackground(container, unlocked and 0.45 or 0, 0.3, 1, 0.9)
 
+    -- 已创建的图标框同步切换为 pfUI 风格（细边框 + 8% 裁边）
+    for _, f in pairs(icons) do
+        Reskin(f, 0.05, 0.05, 0.05)
+        f.inset = 1
+        f.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        if f.size then ResizeIcon(f, f.size) end
+    end
+
     if ccFrame then
         SetSkinBackground(ccFrame, ccUnlocked and 0.3 or 0, 0.3, 1, 0.9)
     end
@@ -500,12 +532,18 @@ end
 
 function IM:Update(force)
     if not db or not container then return end
-    if not enabled then
+    local iconMode = enabled
+    -- 图标列表只属于图标模式；中央控制图标在两种模式下都显示
+    if not iconMode and not db.ccCenter then
         container:Hide()
         if ccFrame then ccFrame:Hide() end
         return
     end
-    if not container:IsShown() then container:Show() end
+    if iconMode then
+        if not container:IsShown() then container:Show() end
+    else
+        container:Hide()
+    end
     TrySkinPfUI()
 
     local now = GetTime()
@@ -575,12 +613,14 @@ function IM:Update(force)
             end
 
             f.icon:SetTexture(e.v.icon or ICON_DEFAULT)
+            if e.v.isDebuff and not e.v.isTarget then
+                SetIconBorder(f, BORDER_SELF_DEBUFF)
+            else
+                SetIconBorder(f, BORDER_DEFAULT)
+            end
             if f.targetName then
-                if e.v.auraKind == "hot" or e.v.auraKind == "dot" then
-                    f.targetName:SetText(e.v.targetName or "")
-                else
-                    f.targetName:SetText("")
-                end
+                -- 目标身上的计时（HoT / DoT / Debuff）统一显示怪物名称
+                f.targetName:SetText(e.v.targetName or "")
             end
             if f.click then
                 f.click.key = e.key
@@ -600,11 +640,20 @@ function IM:Update(force)
         end
     end
 
-    PlaceIcons(selfList, false)
-    PlaceIcons(targetList, true)
+    if iconMode then
+        PlaceIcons(selfList, false)
+        PlaceIcons(targetList, true)
 
-    for key, f in pairs(icons) do
-        if not seen[key] then
+        for key, f in pairs(icons) do
+            if not seen[key] then
+                if f.click then f.click.key = nil end
+                if f.targetName then f.targetName:SetText("") end
+                f:Hide()
+            end
+        end
+    else
+        -- 条形模式：图标列表不显示，只保留中央控制图标
+        for key, f in pairs(icons) do
             if f.click then f.click.key = nil end
             if f.targetName then f.targetName:SetText("") end
             f:Hide()

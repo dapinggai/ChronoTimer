@@ -47,6 +47,11 @@ local TEXPATH = {
     ["Xeon"]     = "Interface\\AddOns\\ChronoTimer\\Textures\\Xeon",
 }
 
+-- 供其它模块（Energy.lua）按材质名取贴图路径，未匹配时回落到默认材质
+function ChronoTimer_TexturePath(name)
+    return TEXPATH[name] or "Interface\\TargetingFrame\\UI-StatusBar"
+end
+
 -- ---------------- 默认配置（对照 Chronometer 默认值） ----------------
 local defaults = {
     enabled      = true,
@@ -62,16 +67,20 @@ local defaults = {
     trackHoTs    = true,
     clickRecastHoT = true,
     trackFireVulnerability = true,
+    trackBladeFlurry = true,   -- 盗贼：监控常驻 Buff「剑刃乱舞」
     showEnergy   = true,
     showEnergyBar = true,
     showComboPoints = true,
     showEnergyTick = true,
+    energyCombatOnly = false,
+    energyTex    = "default",
     showEnslave  = true,
     enslaveDuration = 0,   -- 0 = 自动（固定 300 秒）
     energyWidth  = 150,
     energyHeight = 12,
     comboHeight  = 6,
     comboSpacing = 4,
+    comboStyle   = "bar",   -- bar 长条 / diamond 菱形 / circle 圆形
     pvpDR        = true,
     minDuration  = 0,
     maxDuration  = 0,
@@ -381,7 +390,7 @@ local function BuildText(name, stacks, targetName)
 end
 
 -- ---------------- 计时条 ----------------
-local function ApplyBarSettings(id, isDebuff, spellId, name, fallback, classToken)
+local function ApplyBarSettings(id, isDebuff, spellId, name, fallback, classToken, selfDebuff)
     if db.barscale then candy:SetCandyBarScale(id, db.barscale) end
     candy:SetCandyBarWidth(id,  db.barwidth  or 200)
     candy:SetCandyBarHeight(id, db.barheight or 18)
@@ -390,7 +399,10 @@ local function ApplyBarSettings(id, isDebuff, spellId, name, fallback, classToke
     candy:SetCandyBarColor(id, AuraColorName(isDebuff, spellId, name, fallback))
     candy:SetCandyBarTextColor(id, ColorName(db.textcolor, "textcolor"))
     local classColor = db.classColors and ClassColorName(classToken) or nil
-    if classColor then
+    if selfDebuff and isDebuff then
+        -- 自身 Debuff：背景固定暗红，与 Buff、目标 Debuff 区分
+        candy:SetCandyBarBackgroundColor(id, "ctbg_selfdebuff", db.bgalpha or 0.5)
+    elseif classColor then
         -- 框体背景用职业色，填充色仍保持 Buff/Debuff 分色
         candy:SetCandyBarBackgroundColor(id, classColor, db.bgalpha or 0.5)
     elseif db.multicolor then
@@ -530,7 +542,7 @@ local function CreateBar(key, spellId, name, icon, duration, isDebuff, stacks, b
     candy:RegisterCandyBarWithGroup(id, isTarget and GROUP_TARGET or GROUP_SELF)
     local cachedUnit = isTarget and targetGuid and unitCache[targetGuid]
     local classToken = isTarget and (cachedUnit and cachedUnit.classToken or nil) or UnitClassToken("player")
-    ApplyBarSettings(id, isDebuff, spellId, name, key, classToken)
+    ApplyBarSettings(id, isDebuff, spellId, name, key, classToken, not isTarget)
     ApplyStacksText(id, stacks)
     candy:StartCandyBar(id, false)
     local now = GetTime()
@@ -595,7 +607,7 @@ end
 local function RefreshAllBars()
     if not candy then return end
     for key, v in pairs(active) do
-        ApplyBarSettings(v.id, v.isDebuff, v.spellId, v.name, v.id, v.classToken)
+        ApplyBarSettings(v.id, v.isDebuff, v.spellId, v.name, v.id, v.classToken, not v.isTarget)
         local barText = BuildText(v.name, v.stacks, v.targetName)
         if v.permanent then barText = barText .. "（常驻）" end
         candy:SetCandyBarText(v.id, barText)
@@ -705,10 +717,17 @@ local function IsAuraIgnored(name, spellId)
     return false
 end
 
--- 食物 / 饮料类 Buff 的关键词：只按名称判断，避免图标命中误伤其他 Buff
-local FOOD_WORDS = { "进食", "饮水", "食物", "饮料", "饱食", "food", "drink", "well fed" }
+-- 食物 / 饮料类 Buff 的关键词与图标特征：乌龟服里实际显示为「喝水」「进食」
+local FOOD_WORDS = { "进食", "喝水", "食物", "饮料", "饮食", "饱食", "food", "drink", "well fed" }
+local FOOD_ICONS = { "inv_drink", "inv_misc_food" }
 
 local function IsFoodDrink(texture, name)
+    if texture then
+        local t = string.lower(texture)
+        for i = 1, table.getn(FOOD_ICONS) do
+            if string.find(t, FOOD_ICONS[i], 1, true) then return true end
+        end
+    end
     if not name then return false end
     local n = string.lower(name)
     for i = 1, table.getn(FOOD_WORDS) do
@@ -1139,9 +1158,53 @@ local function RefreshSharedStacks()
 end
 
 -- ---------------- 扫描 ----------------
+-- 盗贼「剑刃乱舞」：乌龟服为持续到取消的常驻 Buff（无剩余时间），独立监控。
+-- ProcessBladeFlurry 在图腾处理之后定义（依赖 HideBarTimerText / PERMANENT_TOTEM），这里前向声明。
+local ProcessBladeFlurry
+local BLADE_FLURRY_IDS = { [13877] = true }
+local function IsBladeFlurry(spellId, name)
+    if spellId and BLADE_FLURRY_IDS[spellId] then return true end
+    if name and string.find(name, "剑刃乱舞", 1, true) then return true end
+    return false
+end
+
+local lastSkipPrint = 0
+local function DebugSkipAura(texture, reason)
+    if not CT.auraDebug then return end
+    local now = GetTime()
+    if now - lastSkipPrint < 2 then return end
+    lastSkipPrint = now
+    Print("[SKIP] " .. tostring(texture) .. " " .. reason)
+end
+
 local function ProcessAura(buffIndex, isDebuff, stamp)
+    -- 盗贼剑刃乱舞：常驻 Buff，剩余时间可能返回 nil / 0 / 负数，先于一切时长过滤处理
+    local bfRogue = (not isDebuff) and db.trackBladeFlurry and UnitClassToken("player") == "ROGUE"
+    if bfRogue and ProcessBladeFlurry then
+        local sid = GetPlayerBuffID and GetPlayerBuffID(buffIndex) or nil
+        if sid and BLADE_FLURRY_IDS[sid] then
+            ProcessBladeFlurry(buffIndex, sid, SpellName(sid), GetPlayerBuffTexture(buffIndex), stamp)
+            return
+        end
+    end
+
     local timeLeft = GetPlayerBuffTimeLeft(buffIndex)
-    if not timeLeft then return end
+    if not timeLeft or timeLeft <= 0 then
+        -- 名称兜底：自定义 ID 或取不到 ID 时按中文名识别
+        if bfRogue and ProcessBladeFlurry then
+            local tex = GetPlayerBuffTexture(buffIndex)
+            local sid = GetPlayerBuffID and GetPlayerBuffID(buffIndex) or nil
+            local nm = SpellName(sid) or TooltipBuffName(buffIndex, tex)
+            if IsBladeFlurry(sid, nm) then
+                ProcessBladeFlurry(buffIndex, sid, nm, tex, stamp)
+                return
+            end
+        end
+        if not timeLeft then
+            DebugSkipAura(GetPlayerBuffTexture(buffIndex), "无剩余时间")
+            return
+        end
+    end
 
     local texture = GetPlayerBuffTexture(buffIndex)
     local spellId
@@ -1158,6 +1221,7 @@ local function ProcessAura(buffIndex, isDebuff, stamp)
     local maxDur = db.maxDuration or 0
     if timeLeft <= 0 or timeLeft < (db.minDuration or 0)
         or (maxDur > 0 and timeLeft > maxDur) then
+        DebugSkipAura(texture, "剩余 " .. tostring(timeLeft) .. " 秒被时长过滤")
         if active[key] then RemoveBar(key) end
         return
     end
@@ -1176,6 +1240,7 @@ local function ProcessAura(buffIndex, isDebuff, stamp)
     end
     -- 白名单 / 忽略名单 / 只显示自己施加的 Buff / 吃喝过滤
     if not AuraAllowed(name, texture, isDebuff, spellId or (v and v.spellId)) then
+        DebugSkipAura(texture, tostring(name) .. " 被名单 / 来源 / 吃喝过滤")
         if v then RemoveBar(key) end
         return
     end
@@ -1307,7 +1372,7 @@ local function OnTotemCast(spellId)
     local info = TOTEM_INFO[name] or TOTEM_INFO[string.lower(name)]
     if not info then return end
     totemCasts[info.slot] = {
-        name = name, icon = info.icon,
+        name = name, icon = SpellIcon(spellId) or info.icon,
         started = GetTime(),
         -- 补位时长用内置图腾表，真实剩余时间仍以 GetTotemInfo 为准
         duration = info.duration,
@@ -1321,34 +1386,27 @@ local function ProcessTotem(slot, now, seen)
     if GetTotemInfo then
         haveTotem, name, startTime, duration, icon = GetTotemInfo(slot)
     end
-    if type(icon) == "number" and GetSpellIconTexture then
-        icon = GetSpellIconTexture(icon)
-    end
 
     local cast = totemCasts[slot]
     local permanent = false
     local useCast = false
     if cast then
-        -- GetTotemInfo 还没刷新出新图腾时，以施放记录为准
-        if not haveTotem then
-            useCast = true
-        elseif name and cast.name and string.lower(name) ~= string.lower(cast.name) then
-            useCast = true
-        end
-        if useCast then
-            if not cast.permanent then
-                local left = cast.started + cast.duration - now
-                if left <= 0 then
-                    totemCasts[slot] = nil
-                    return
-                end
+        -- 与「一键图腾管理」保持一致：倒计时按施放时刻 + 表中时长推算
+        useCast = true
+        if not cast.permanent then
+            local castDuration = cast.duration
+            if castDuration and ArchiTotem_TotemicMasteryBonus and ArchiTotem_TotemicMasteryBonus > 0 then
+                castDuration = castDuration * (1 + ArchiTotem_TotemicMasteryBonus)
             end
-            name, icon = cast.name, cast.icon
-            startTime, duration = cast.started, cast.duration
-            permanent = cast.permanent
-        else
-            totemCasts[slot] = nil
+            local left = cast.started + (castDuration or 0) - now
+            if left <= 0 then
+                totemCasts[slot] = nil
+                return
+            end
         end
+        name, icon = cast.name, cast.icon
+        startTime, duration = cast.started, cast.duration
+        permanent = cast.permanent
     end
     if not useCast then
         if haveTotem then
@@ -1361,7 +1419,29 @@ local function ProcessTotem(slot, now, seen)
 
     -- 归一化，避免 nil 与默认值不一致导致每帧重建
     if not name then name = "图腾 " .. slot end
-    if not icon then icon = "Interface\\Icons\\INV_Misc_QuestionMark" end
+    -- 图标：部分客户端 GetTotemInfo 返回数字图标 ID 且没有 GetSpellIconTexture，
+    -- 转不出贴图路径时回落到内置图腾表，避免图标空白或只显示一部分
+    if type(icon) == "number" then
+        icon = GetSpellIconTexture and GetSpellIconTexture(icon) or nil
+    end
+    local plain = string.gsub(name, "%s*%(.*%)$", "")
+    local info = TOTEM_INFO[name] or TOTEM_INFO[plain] or TOTEM_INFO[string.lower(plain)]
+    if type(icon) ~= "string" or icon == "" then
+        icon = (info and info.icon) or "Interface\\Icons\\INV_Misc_QuestionMark"
+    end
+    -- 时长统一按「一键图腾管理」(ArchiTotem) 的图腾数据，保证两处倒计时一致
+    if not permanent and info and type(ArchiTotem_TotemData) == "table" then
+        for _, d in pairs(ArchiTotem_TotemData) do
+            if d.name == info.en and type(d.duration) == "number" and d.duration > 0 then
+                duration = d.duration
+                break
+            end
+        end
+    end
+    -- 图腾掌握天赋会延长持续时间，一键图腾管理的倒计时同样按此加成计算
+    if not permanent and duration and ArchiTotem_TotemicMasteryBonus and ArchiTotem_TotemicMasteryBonus > 0 then
+        duration = duration * (1 + ArchiTotem_TotemicMasteryBonus)
+    end
 
     local remain
     if permanent then
@@ -1403,6 +1483,31 @@ local function ProcessTotem(slot, now, seen)
                 candy:SetCandyBarText(bar.id, BuildText(name, nil) .. "（常驻）")
                 HideBarTimerText(bar.id)
             end
+        end
+    end
+end
+
+-- 盗贼：剑刃乱舞（常驻 Buff）。复用图腾的"（常驻）+ 隐藏时间文本"做法，
+-- 用超长时长注册计时条，再隐藏剩余时间文本；图标模式按 permanent 不显示倒计时。
+-- 取消 Buff 后本帧不再被调用，stamp 不更新，由 ScanAuras 的过期清理自动移除。
+ProcessBladeFlurry = function(buffIndex, spellId, name, texture, stamp)
+    local key = "bladeflurry"
+    local v = active[key]
+    if v then
+        v.stamp = stamp
+        v.buffIndex = buffIndex
+        return
+    end
+    local icon = SpellIcon(spellId) or texture
+    CreateBar(key, spellId, name or "剑刃乱舞", icon, PERMANENT_TOTEM, false, nil, buffIndex)
+    local bar = active[key]
+    if bar then
+        bar.permanent = true
+        bar.isBladeFlurry = true
+        candy:SetCandyBarText(bar.id, BuildText(bar.name, nil) .. "（常驻）")
+        HideBarTimerText(bar.id)
+        if CT.auraDebug then
+            Print("[BF] 剑刃乱舞 常驻监控 sid=" .. tostring(spellId) .. " tex=" .. tostring(texture))
         end
     end
 end
@@ -1512,7 +1617,7 @@ ScanAuras = function(force)
                 if total > 0 then
                     local gone = {}
                     for key, v in pairs(active) do
-                        if not v.isTarget and not v.isTotem and not v.isEnslave and v.spellId and v.spellId > 0
+                        if not v.isTarget and not v.isTotem and not v.isEnslave and not v.isBladeFlurry and v.spellId and v.spellId > 0
                             and not present[v.spellId] then
                             gone[table.getn(gone) + 1] = key
                         end
@@ -1559,7 +1664,7 @@ ScanAuras = function(force)
                             changed = true
                         end
                         if changed then
-                            ApplyBarSettings(v.id, v.isDebuff, v.spellId, v.name, v.id, v.classToken)
+                            ApplyBarSettings(v.id, v.isDebuff, v.spellId, v.name, v.id, v.classToken, not v.isTarget)
                         end
                     end
                 end
@@ -2160,6 +2265,19 @@ local function BuildOptions()
                             end
                         end,
                     },
+                    bladeflurry = {
+                        name = "监控剑刃乱舞（盗贼）", type = "toggle", order = 3.6,
+                        desc = "乌龟服剑刃乱舞为持续到取消的常驻 Buff（无剩余时间）。开启后，激活时显示一条常驻计时条 / 图标，取消后自动隐藏；仅盗贼生效。",
+                        get = function() return db.trackBladeFlurry end,
+                        set = function(v)
+                            db.trackBladeFlurry = v
+                            if v then
+                                ScanAuras(true)
+                            elseif active["bladeflurry"] then
+                                RemoveBar("bladeflurry")
+                            end
+                        end,
+                    },
                     minDuration = {
                         name = "最短显示时长", type = "range", order = 4,
                         desc = "剩余时间低于该秒数的光环不显示（0 = 全部显示）",
@@ -2484,7 +2602,7 @@ local function BuildOptions()
                     },
                     ccCenter = {
                         name = "控制类 Debuff 居中显示", type = "toggle", order = 10,
-                        desc = "自身眩晕、定身等控制类 Debuff 单独显示在屏幕中央，图标上下带灰色横线与红色柔光",
+                        desc = "自身眩晕、定身等控制类 Debuff 单独显示在屏幕中央，图标上下带灰色横线与红色柔光；条形与图标模式下都会显示",
                         get = function() return db.ccCenter end,
                         set = function(v)
                             db.ccCenter = v
@@ -2554,15 +2672,34 @@ local function BuildOptions()
                             if ChronoTimerEnergy_Refresh then ChronoTimerEnergy_Refresh() end
                         end,
                     },
+                    energyCombatOnly = {
+                        name = "仅战斗中显示", type = "toggle", order = 5,
+                        desc = "开启后能量条与连击点只在进入战斗时出现，脱战后自动隐藏",
+                        get = function() return db.energyCombatOnly == true end,
+                        set = function(v)
+                            db.energyCombatOnly = v
+                            if ChronoTimerEnergy_Refresh then ChronoTimerEnergy_Refresh() end
+                        end,
+                    },
+                    energyTex = {
+                        name = "能量条材质", type = "text", order = 6,
+                        desc = "能量条与连击点小长条的填充材质，与计时条材质列表相同，default 为暴雪标准条",
+                        validate = TEXORDER,
+                        get = function() return db.energyTex or "default" end,
+                        set = function(v)
+                            db.energyTex = v
+                            if ChronoTimerEnergy_Apply then ChronoTimerEnergy_Apply() end
+                        end,
+                    },
                     moveEnergy = {
-                        name = "移动位置（解锁拖动）", type = "execute", order = 5,
+                        name = "移动位置（解锁拖动）", type = "execute", order = 7,
                         desc = "点击后能量条出现绿框，直接用左键拖动即可移动，再次点击锁定（也可随时按住 Ctrl 拖动）",
                         func = function()
                             if ChronoTimerEnergy_ToggleMove then ChronoTimerEnergy_ToggleMove() end
                         end,
                     },
                     energyWidth = {
-                        name = "能量条宽度", type = "range", order = 6,
+                        name = "能量条宽度", type = "range", order = 8,
                         desc = "能量进度条的宽度（像素）",
                         min = 60, max = 400, step = 5,
                         get = function() return db.energyWidth or 150 end,
@@ -2572,7 +2709,7 @@ local function BuildOptions()
                         end,
                     },
                     energyHeight = {
-                        name = "能量条高度", type = "range", order = 7,
+                        name = "能量条高度", type = "range", order = 9,
                         desc = "能量进度条的高度（像素），文字大小随之缩放",
                         min = 6, max = 40, step = 1,
                         get = function() return db.energyHeight or 12 end,
@@ -2582,9 +2719,9 @@ local function BuildOptions()
                         end,
                     },
                     comboHeight = {
-                        name = "连击点高度", type = "range", order = 8,
-                        desc = "能量条上方每格连击点小长条的高度（像素）",
-                        min = 2, max = 20, step = 1,
+                        name = "连击点高度", type = "range", order = 10,
+                        desc = "每格连击点的尺寸：长条模式为高度，菱形 / 圆形为边长（像素）",
+                        min = 2, max = 40, step = 1,
                         get = function() return db.comboHeight or 6 end,
                         set = function(v)
                             db.comboHeight = v
@@ -2592,8 +2729,8 @@ local function BuildOptions()
                         end,
                     },
                     comboSpacing = {
-                        name = "连击点间距", type = "range", order = 9,
-                        desc = "连击点小长条之间的间隔（像素）",
+                        name = "连击点间距", type = "range", order = 11,
+                        desc = "连击点小长条 / 图形之间的间隔（像素）",
                         min = 0, max = 20, step = 1,
                         get = function() return db.comboSpacing or 4 end,
                         set = function(v)
@@ -2601,8 +2738,27 @@ local function BuildOptions()
                             if ChronoTimerEnergy_Apply then ChronoTimerEnergy_Apply() end
                         end,
                     },
+                    comboStyle = {
+                        name = "连击点样式", type = "text", order = 11.5,
+                        desc = "长条：铺满能量条宽度；正方形 / 菱形 / 圆形：在能量条上方居中的图形，大小由「连击点高度」控制",
+                        validate = { "长条", "正方形", "菱形", "圆形" },
+                        get = function()
+                            local s = db.comboStyle or "bar"
+                            if s == "square"  then return "正方形" end
+                            if s == "diamond" then return "菱形" end
+                            if s == "circle"  then return "圆形" end
+                            return "长条"
+                        end,
+                        set = function(v)
+                            if v == "正方形" then db.comboStyle = "square"
+                            elseif v == "菱形" then db.comboStyle = "diamond"
+                            elseif v == "圆形" then db.comboStyle = "circle"
+                            else db.comboStyle = "bar" end
+                            if ChronoTimerEnergy_Apply then ChronoTimerEnergy_Apply() end
+                        end,
+                    },
                     resetEnergy = {
-                        name = "恢复默认位置", type = "execute", order = 10,
+                        name = "恢复默认位置", type = "execute", order = 12,
                         desc = "把能量条移回屏幕中下方",
                         func = function()
                             if ChronoTimerEnergy_Reset then ChronoTimerEnergy_Reset() end
@@ -2907,7 +3063,7 @@ local function SetupIntroText()
 
     local npLine = npOK and "|cff00ff00Nampower 已连接|r" or "|cffff0000未检测到 Nampower|r"
     fs:SetText(
-        "|cFF77BBFFChronoTimer 光环计时  v1.6.15|r\n" ..
+        "|cFF77BBFFChronoTimer 光环计时  v1.6.16|r\n" ..
         npLine .. "\n\n" ..
         "自身光环 / 图腾 / 多目标 HoT / DoT 计时\n" ..
         "HoT 左键补施 · 团队共享火焰易伤\n" ..
@@ -2969,6 +3125,8 @@ local function RegisterPaintColors()
     -- 背景分色：Buff 墨绿 / Debuff 暗红
     paint:RegisterColor("ctbg_buff",   0.04, 0.20, 0.12)
     paint:RegisterColor("ctbg_debuff", 0.30, 0.03, 0.03)
+    -- 自身 Debuff 背景：更饱和的红，和 Buff / 目标 Debuff 区分
+    paint:RegisterColor("ctbg_selfdebuff", 0.48, 0.02, 0.02)
     -- 职业色（用于计时条框体 / 锚点框架）
     for token, c in pairs(CLASS_COLORS) do
         paint:RegisterColor("ctclass_" .. token, c[1], c[2], c[3])
@@ -2987,7 +3145,7 @@ end
 
 local function PrintStatus()
     local lines = {}
-    lines[1] = "版本 1.6.15"
+    lines[1] = "版本 1.6.16"
     lines[2] = "Nampower：" .. (npOK and "已连接" or "未检测到")
     lines[3] = "依赖库：" ..
         "CandyBar=" .. (candy and "有" or "无") ..
@@ -3223,6 +3381,7 @@ end
 
 -- ---------------- 连击点通用时长推断 ----------------
 -- 终结技 DoT 的真实时长由连击点决定（割裂 1~5 星 = 8/10/12/14/16 秒），
+-- 其中割裂还会叠加「血腥气息」天赋加成（1 级 +4 秒，2 级及以上 +6 秒）。
 -- 但 Nampower 的 AURA_CAST_ON_OTHER 只回 DBC 占位时长（割裂固定 6000ms）。
 -- 现在按 DBC 方式处理：
 --   * 基础时长读 GetSpellRecField(spellId, "duration")（DBC 权威值）
@@ -3242,6 +3401,50 @@ local CP_BASE_OVERRIDE = {
 
 local cpHold, cpHoldAt, cpHoldGuid = 0, nil, nil
 local cpPollAt = 0
+
+-- 割裂（Rupture）额外受「血腥气息 / Taste for Blood」天赋影响：
+-- 1 级 +4 秒，2 级及以上 +6 秒（客户端第 3 级已废弃但数据仍为 +6 秒）。
+-- 时长规则与 Chronometer 的盗贼数据保持一致：基础时长 + 2 秒 × 连击点 + 天赋加成。
+local TASTE_FOR_BLOOD_BONUS = { 4, 6, 6 }
+local TASTE_FOR_BLOOD_NAMES = {
+    ["Taste for Blood"] = true,
+    ["血腥气息"] = true,
+    ["嗜血渴望"] = true,   -- zhTW
+}
+-- 割裂名称：只认中文名，其他语言客户端靠图标名识别
+local RUPTURE_NAMES = {
+    ["割裂"] = true,
+}
+
+local tasteForBloodRank, tasteForBloodAt = nil, 0
+-- 血腥气息天赋等级；30 秒缓存，避免每次 DoT 都扫一遍天赋
+local function TasteForBloodRank()
+    local now = GetTime()
+    if tasteForBloodRank and now - tasteForBloodAt < 30 then
+        return tasteForBloodRank
+    end
+    tasteForBloodAt = now
+    tasteForBloodRank = 0
+    if not GetTalentInfo or not GetNumTalents
+        or (UnitClassToken and UnitClassToken("player") ~= "ROGUE") then
+        return 0
+    end
+    local tabs = GetNumTalentTabs and GetNumTalentTabs() or 3
+    for tab = 1, tabs do
+        for index = 1, GetNumTalents(tab) do
+            local name, texture, _, _, rank = GetTalentInfo(tab, index)
+            local matched = name and TASTE_FOR_BLOOD_NAMES[name]
+            if not matched and texture then
+                matched = string.find(string.lower(texture), "tasteforblood", 1, true) ~= nil
+            end
+            if matched then
+                tasteForBloodRank = tonumber(rank) or 0
+                return tasteForBloodRank
+            end
+        end
+    end
+    return 0
+end
 
 local function PollComboPoints(now)
     if not GetComboPoints then return end
@@ -3272,12 +3475,63 @@ local function SpellBaseDurationMs(spellId)
     return nil
 end
 
+-- 判断是否为割裂（只认中文名，图标名兜底）
+local function IsRuptureSpell(spellId)
+    local name = SpellName(spellId)
+    if name then
+        name = string.gsub(name, "^%s*(.-)%s*$", "%1")
+        if RUPTURE_NAMES[name] then return true end
+    end
+    local icon = SpellIcon(spellId)
+    if icon and string.find(string.lower(icon), "rupture", 1, true) then return true end
+    return false
+end
+
+-- 肾击（Kidney Shot）：1 秒 + 1 秒 × 连击点（与 Chronometer 的 rs=1, cp=1 一致）
+local KIDNEY_SHOT_NAMES = {
+    ["肾击"] = true,
+    ["腎擊"] = true,   -- zhTW
+}
+
+local function IsKidneyShotSpell(spellId)
+    local name = SpellName(spellId)
+    if name then
+        name = string.gsub(name, "^%s*(.-)%s*$", "%1")
+        if KIDNEY_SHOT_NAMES[name] then return true end
+    end
+    local icon = SpellIcon(spellId)
+    if icon and string.find(string.lower(icon), "kidneyshot", 1, true) then return true end
+    return false
+end
+
+-- 肾击时长：事件缺时长或只给 1 秒基础值时，用连击点推算
+local function ComboPointStunDuration(spellId, targetGuid, effectAuraName, now)
+    if effectAuraName and effectAuraName ~= 12 then return nil end
+    if not cpHold or cpHold <= 0 or not cpHoldAt then return nil end
+    if (now - cpHoldAt) > CP_SPEND_WINDOW then return nil end
+    if cpHoldGuid and targetGuid and cpHoldGuid ~= targetGuid then return nil end
+    if not IsKidneyShotSpell(spellId) then return nil end
+    return 1 + cpHold
+end
+
 -- 返回按连击点推算的秒数；nil 表示保持事件反馈的时长
 local function ComboPointDoTDuration(spellId, targetGuid, effectAuraName, durationMs, now)
     if effectAuraName ~= 3 then return nil end
     if not cpHold or cpHold <= 0 or not cpHoldAt then return nil end
     if (now - cpHoldAt) > CP_SPEND_WINDOW then return nil end
     if cpHoldGuid and targetGuid and cpHoldGuid ~= targetGuid then return nil end
+
+    -- 割裂单独处理：部分客户端 DBC/事件时长给的是满级或占位值（实测 12 秒），
+    -- 不能走下面的“占位值”判断，直接按真实规则计算：
+    --   8 秒（1 星）+ 2 秒 × (连击点 - 1) + 血腥气息天赋加成
+    if IsRuptureSpell(spellId) then
+        local duration = 8 + CP_PER_POINT * (cpHold - 1)
+        local rank = TasteForBloodRank()
+        local bonus = rank > 0 and TASTE_FOR_BLOOD_BONUS[rank]
+        if bonus then duration = duration + bonus end
+        return duration
+    end
+
     local baseMs = CP_BASE_OVERRIDE[spellId] or SpellBaseDurationMs(spellId) or durationMs
     if not baseMs or baseMs <= 0 then return nil end
     -- 只处理 DBC 基础本身是占位值的终结技 DoT；真实时长的 DoT 不动
@@ -3298,6 +3552,9 @@ local function HandleExternalCast(spellId, casterGuid, targetGuid, effectAuraNam
     local ownCast = IsCasterSelf(casterGuid)
     -- 事件缺时长时用 DBC 基础时长兜底
     if not durationMs or durationMs <= 0 then durationMs = SpellBaseDurationMs(spellId) end
+    -- 肾击：DBC 只有 1 秒基础值，真实时长按连击点计算
+    local cpStun = ownCast and ComboPointStunDuration(spellId, targetGuid, effectAuraName, GetTime())
+    if cpStun and (not durationMs or durationMs <= 0) then durationMs = cpStun * 1000 end
     if not durationMs or durationMs <= 0 then return end
 
     if not ownCast and (casterGuid or not HandleJudgement("cast", spellId)) then return end
@@ -3323,6 +3580,8 @@ local function HandleExternalCast(spellId, casterGuid, targetGuid, effectAuraNam
                 .. " -> " .. tostring(cpDuration))
         end
         if cpDuration and cpDuration > duration then duration = cpDuration end
+        -- 肾击：事件只给 1 秒基础值时改用连击点推算的时长
+        if cpStun and duration <= 1.5 and cpStun > duration then duration = cpStun end
     end
     local auraKind = isHot and "hot" or (effectAuraName == 3 and "dot" or "debuff")
     if CT.auraDebug then
