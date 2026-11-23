@@ -1,6 +1,6 @@
 # ChronoTimer
 
-**Turtle WoW (1.12) aura / HoT / DoT timer addon.** 乌龟服光环计时插件，基于 Chronometer 重构。
+**Turtle WoW (1.12) aura / HoT / DoT timer addon.** 乌龟服光环计时插件，基于 Chronometer 重构，界面沿用 Chronometer，需 Nampower 支持（UI based on Chronometer, requires Nampower）。
 
 - 版本 / Version：1.6.24
 - 作者 / Author：灵灵漆
