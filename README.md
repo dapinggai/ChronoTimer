@@ -1,10 +1,13 @@
 # ChronoTimer
 
-**Turtle WoW (1.12) aura / HoT / DoT timer addon.** 乌龟服光环计时插件，基于 Chronometer 重构，界面沿用 Chronometer，需 Nampower 支持（UI based on Chronometer, requires Nampower）。
+**Turtle WoW (1.12) aura / totem / HoT / DoT timer addon.**
+乌龟服光环计时插件，界面沿用 Chronometer，需 Nampower 支持（UI based on Chronometer, requires Nampower）。
 
-- 版本 / Version：1.6.24
-- 作者 / Author：灵灵漆
-- 语言 / Language：中文（zhCN）
+- 版本：1.6.25
+- 作者：灵灵漆
+- 语言：Lua（WoW 1.12 插件）
+- GitHub：https://github.com/dapinggai/ChronoTimer
+- Gitee：https://gitee.com/schreier/chrono-timer
 
 ---
 
@@ -12,8 +15,9 @@
 
 适用于《乌龟服》(Turtle WoW) 1.12 客户端。ChronoTimer 基于 Chronometer 重构，用来显示自身 Buff / Debuff、图腾、多目标 HoT / DoT 以及团队共享火焰易伤的剩余时间。
 
-- 版本：1.6.24
+- 版本：1.6.25
 - 作者：灵灵漆
+- 仓库：https://github.com/dapinggai/ChronoTimer
 - 原作：Chronometer（原作者 Bhattu，后续修复 laytya、dein0s、武藤纯子酱、Sunelegy）
 - 依赖：`!Libs`（内含 CandyBar-2.2、Waterfall-1.0 等库）；名称识别、多目标 HoT / DoT 与火焰易伤追踪依赖 Nampower
 
@@ -83,8 +87,6 @@
 | 启用计时 | 总开关，关闭后清空所有计时条 |
 | 显示 Buff | 显示自身有益光环 |
 | 显示 Debuff | 显示自身有害光环 |
-| 显示图腾 | 显示自己已施放图腾的剩余时间（萨满） |
-| 监控剑刃乱舞（盗贼） | 默认开启，仅盗贼生效。乌龟服剑刃乱舞为持续到取消的常驻 Buff（无剩余时间），激活时显示常驻计时条 / 图标（标注「常驻」，无倒计时），取消后自动隐藏 |
 | 最短显示时长 | 剩余时间低于该秒数不显示（0 = 全部显示） |
 | 最长显示时长 | 剩余时间超过该秒数不显示，可用于过滤长时间祝福（0 = 不过滤） |
 | 仅监控自定义名单 | 开启后只显示名单里的 Buff / Debuff，其余一律不显示；图腾不受影响 |
@@ -223,6 +225,33 @@
 
 - 隐藏小地图按钮：隐藏后仍可通过 `/ct` 打开设置
 
+### 8. 职业专属页（萨满 / 盗贼 / 术士）
+
+各职业专属页仅对应职业可见，原本在「常规」里的职业选项已集中到这里。
+
+**萨满**
+
+| 选项 | 说明 |
+| --- | --- |
+| 显示图腾 | 显示自己已施放图腾的剩余时间 |
+| 启用一键图腾（ArchiTotem） | 默认开启。内置图腾大师（四系图腾条 / 一键召唤 / 召回 / 预设）。关闭后立即隐藏图腾栏并停用，`/at` 命令失效；重新开启需 /reload 生效。关闭时「图腾栏」外观配置分类也会自动隐藏 |
+| 打印 /at 全部命令到聊天框 | 点击把一键图腾的全部斜杠命令打印到聊天框（也可直接输入 `/at` 或 `/ct totem`） |
+
+- 常用命令：`/at cast` 一键召唤、`/at recall` 召回、`/at preset` 预设、`/at scale` 缩放、`/at reset` 重置位置、`/at` 查看全部。
+- 冲突检测：若插件列表中同时启用了独立的 ArchiTotem 插件，登录时会弹出提示，确认后自动禁用独立插件并 /reload（ChronoTimer 已内置图腾大师，两者同时启用会出现两套图腾条）。
+
+**盗贼**
+
+| 选项 | 说明 |
+| --- | --- |
+| 监控剑刃乱舞 | 默认开启，仅盗贼生效。乌龟服剑刃乱舞为持续到取消的常驻 Buff（无剩余时间），激活时显示常驻计时条 / 图标（标注「常驻」，无倒计时），取消后自动隐藏 |
+
+**术士**
+
+| 选项 | 说明 |
+| --- | --- |
+| 监控恶魔叛变 / 叛变倒计时 | 施放奴役恶魔后显示叛变倒计时，宠物消失或被替换时自动移除（仅术士可见） |
+
 ---
 
 ## 五、颜色说明
@@ -270,6 +299,6 @@
 退出游戏后删除 `World of Warcraft\WTF\Account\<账号>\SavedVariables\ChronoTimer.lua`，或在设置中逐项调整。
 
 **Q：开启了图标模式，但屏幕上没有图标？**
-1. 确认「使用图标显示」已勾选，且常规里的「显示 Buff」「显示 Debuff」「显示图腾」处于开启状态；
+1. 确认「使用图标显示」已勾选，且「显示 Buff」「显示 Debuff」（常规）与「显示图腾」（萨满页）处于开启状态；
 2. 在图标模式里点「解锁图标位置」，检查图标列是否被拖到屏幕外，可点「重置图标位置」；
 3. 有控类 Debuff 时，它会从图标列移到屏幕中央，检查「解锁居中图标位置」是否把它拖出了屏幕。

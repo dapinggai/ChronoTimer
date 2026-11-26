@@ -11,7 +11,7 @@ desktop.ini
 .vscode/
 .idea/
 
-# 打包产物（zip 等不要进仓库）
+# 打包产物（zip/7z 等不要进仓库）
 *.zip
 *.rar
 *.7z

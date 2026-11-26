@@ -600,12 +600,33 @@ local function ArchiTotem_CheckCombatLogForTotem(msg)
     return false
 end
 
+-- 检测是否存在独立的 ArchiTotem 插件（非本插件内嵌；ChronoTimer 的插件名是 ChronoTimer）
+function ArchiTotem_IsStandaloneLoaded()
+    if IsAddOnLoaded and IsAddOnLoaded("ArchiTotem") then return true end
+    if GetAddOnInfo then
+        local _, _, _, enabled = GetAddOnInfo("ArchiTotem")
+        if enabled then return true end
+    end
+    return false
+end
+
 -- 主加载
 function ArchiTotem_OnLoad()
+    -- 存在独立 ArchiTotem 时，内嵌版本直接停用：不注册事件、不挂 OnUpdate、隐藏帧体，
+    -- 避免两套帧体/全局函数互相覆盖导致 TimeSinceLastUpdate 为 nil 等冲突报错。
+    if ArchiTotem_IsStandaloneLoaded() then
+        this:UnregisterAllEvents()
+        this:SetScript("OnUpdate", nil)
+        this:Hide()
+        ArchiTotem_StandalonePresent = true
+        return
+    end
+
     if class ~= "SHAMAN" then
         ArchiTotem_Options = nil
         ArchiTotem_TotemData = nil
         this:UnregisterAllEvents()
+        this:SetScript("OnUpdate", nil)
         ArchiTotemFrame:Hide()
         return
     end

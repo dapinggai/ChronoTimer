@@ -3,6 +3,7 @@
 --  功能：显示玩家自身 Buff / Debuff 的剩余时间
 --  界面：沿用 Chronometer 的 CandyBar 计时条外观 + Waterfall 设置面板
 --  数据：Nampower 事件 + GetPlayerBuff / GetPlayerBuffTimeLeft
+--  仓库：https://github.com/dapinggai/ChronoTimer
 -- =====================================================================
 
 ChronoTimer = {}
@@ -68,6 +69,7 @@ local defaults = {
     clickRecastHoT = true,
     trackFireVulnerability = true,
     trackBladeFlurry = true,   -- 盗贼：监控常驻 Buff「剑刃乱舞」
+    enableArchiTotem = true,   -- 萨满：是否加载内置一键图腾 ArchiTotem
     showEnergy   = true,
     showEnergyBar = true,
     showComboPoints = true,
@@ -138,6 +140,7 @@ local lastScan    = 0
 local pendingScan = false
 local initialized = false
 local npOK        = false
+local pendingArchiTotem  -- 萨满页切换一键图腾时的待确认目标值（确认后写入并重载）
 
 local anchor
 local minimapButton
@@ -2246,38 +2249,6 @@ local function BuildOptions()
                         desc = "显示自身有害光环的剩余时间",
                         get = GetField("showDebuffs"), set = SetField("showDebuffs"),
                     },
-                    totems = {
-                        name = "显示图腾", type = "toggle", order = 3.5,
-                        desc = "显示自己已施放图腾的剩余持续时间（萨满）",
-                        get = function() return db.showTotems end,
-                        set = function(v)
-                            db.showTotems = v
-                            if v then
-                                ScanAuras(true)
-                            else
-                                local keys = {}
-                                for key, bar in pairs(active) do
-                                    if bar.isTotem then keys[table.getn(keys) + 1] = key end
-                                end
-                                for i = 1, table.getn(keys) do
-                                    RemoveBar(keys[i])
-                                end
-                            end
-                        end,
-                    },
-                    bladeflurry = {
-                        name = "监控剑刃乱舞（盗贼）", type = "toggle", order = 3.6,
-                        desc = "乌龟服剑刃乱舞为持续到取消的常驻 Buff（无剩余时间）。开启后，激活时显示一条常驻计时条 / 图标，取消后自动隐藏；仅盗贼生效。",
-                        get = function() return db.trackBladeFlurry end,
-                        set = function(v)
-                            db.trackBladeFlurry = v
-                            if v then
-                                ScanAuras(true)
-                            elseif active["bladeflurry"] then
-                                RemoveBar("bladeflurry")
-                            end
-                        end,
-                    },
                     minDuration = {
                         name = "最短显示时长", type = "range", order = 4,
                         desc = "剩余时间低于该秒数的光环不显示（0 = 全部显示）",
@@ -2784,6 +2755,73 @@ local function BuildOptions()
                     },
                 },
             },
+            shaman = {
+                name = hcolor .. "萨满", type = "group", order = 28.5,
+                args = {
+                    showTotems = {
+                        name = "显示图腾", type = "toggle", order = 1,
+                        desc = "显示自己已施放图腾的剩余持续时间（萨满）",
+                        get = function() return db.showTotems end,
+                        set = function(v)
+                            db.showTotems = v
+                            if v then
+                                ScanAuras(true)
+                            else
+                                local keys = {}
+                                for key, bar in pairs(active) do
+                                    if bar.isTotem then keys[table.getn(keys) + 1] = key end
+                                end
+                                for i = 1, table.getn(keys) do
+                                    RemoveBar(keys[i])
+                                end
+                            end
+                        end,
+                    },
+                    enableArchiTotem = {
+                        name = "启用一键图腾（ArchiTotem）", type = "toggle", order = 2,
+                        desc = "内置图腾大师：四系图腾条 / 一键召唤 / 召回 / 预设。切换启用状态会弹出重载提示，确认后生效；若检测到独立 ArchiTotem 插件，内嵌版将自动停用以避免冲突",
+                        get = function() return db.enableArchiTotem ~= false end,
+                        set = function(v)
+                            -- 状态未变则不处理；变化时弹确认框，按“是”才写入并重载，按“否”保持原值
+                            if (db.enableArchiTotem ~= false) == v then return end
+                            pendingArchiTotem = v
+                            StaticPopup_Show("CHRONOTIMER_ARCHITOTEM_TOGGLE")
+                        end,
+                    },
+                    archiCmdHeader = {
+                        name = "ArchiTotem 使用命令", type = "header", order = 3,
+                    },
+                    archiCmdPrint = {
+                        name = "打印 /at 全部命令到聊天框", type = "execute", order = 4,
+                        desc = "把一键图腾的全部斜杠命令打印到聊天框（也可直接输入 /at 查看）。常用：/at cast 一键召唤、/at recall 召回、/at preset 预设、/at scale 缩放、/at reset 重置位置",
+                        func = function()
+                            if ArchiTotem_ShowCommandHelp then
+                                ArchiTotem_ShowCommandHelp()
+                            else
+                                Print("图腾助手未加载")
+                            end
+                        end,
+                    },
+                },
+            },
+            rogue = {
+                name = hcolor .. "盗贼", type = "group", order = 28.6,
+                args = {
+                    trackBladeFlurry = {
+                        name = "监控剑刃乱舞", type = "toggle", order = 1,
+                        desc = "乌龟服剑刃乱舞为持续到取消的常驻 Buff（无剩余时间）。开启后，激活时显示一条常驻计时条 / 图标，取消后自动隐藏；仅盗贼生效。",
+                        get = function() return db.trackBladeFlurry end,
+                        set = function(v)
+                            db.trackBladeFlurry = v
+                            if v then
+                                ScanAuras(true)
+                            elseif active["bladeflurry"] then
+                                RemoveBar("bladeflurry")
+                            end
+                        end,
+                    },
+                },
+            },
             totem = {
                 name = hcolor .. "图腾栏", type = "group", order = 40,
                 args = {
@@ -3033,6 +3071,18 @@ local function BuildOptions()
         options.args.warlock = nil
     end
 
+    -- 萨满专属页：仅萨满可见；若已禁用一键图腾，则同时隐藏「图腾栏」外观配置
+    if UnitClassToken("player") ~= "SHAMAN" then
+        options.args.shaman = nil
+    elseif db.enableArchiTotem == false then
+        options.args.totem = nil
+    end
+
+    -- 盗贼专属页：仅盗贼可见
+    if UnitClassToken("player") ~= "ROGUE" then
+        options.args.rogue = nil
+    end
+
     -- 设置界面标题栏使用玩家职业颜色
     local classToken = UnitClassToken("player")
     local cc = classToken and CLASS_COLORS[classToken]
@@ -3063,13 +3113,14 @@ local function SetupIntroText()
 
     local npLine = npOK and "|cff00ff00Nampower 已连接|r" or "|cffff0000未检测到 Nampower|r"
     fs:SetText(
-        "|cFF77BBFFChronoTimer 光环计时  v1.6.16|r\n" ..
+        "|cFF77BBFFChronoTimer 光环计时  v1.6.25|r\n" ..
         npLine .. "\n\n" ..
         "自身光环 / 图腾 / 多目标 HoT / DoT 计时\n" ..
         "HoT 左键补施 · 团队共享火焰易伤\n" ..
         "/ct 设置 · /ct list 名单\n" ..
         "/ct ignore 忽略 · /ct totem 图腾\n" ..
-        "拖动锚点可移动计时条"
+        "拖动锚点可移动计时条\n" ..
+        "仓库 github.com/dapinggai/ChronoTimer"
     )
 
     local h = fs:GetHeight()
@@ -3145,7 +3196,7 @@ end
 
 local function PrintStatus()
     local lines = {}
-    lines[1] = "版本 1.6.16"
+    lines[1] = "版本 1.6.25"
     lines[2] = "Nampower：" .. (npOK and "已连接" or "未检测到")
     lines[3] = "依赖库：" ..
         "CandyBar=" .. (candy and "有" or "无") ..
@@ -3162,6 +3213,8 @@ local function PrintStatus()
         " GetUnitField=" .. (GetUnitField and "有" or "无") ..
         " GetPlayerBuffID=" .. (GetPlayerBuffID and "有" or "无")
     lines[8] = "存档：ChronoTimerDB" .. (type(ChronoTimerDB) == "table" and " 存在" or " 不存在")
+    lines[9] = "GitHub：https://github.com/dapinggai/ChronoTimer"
+    lines[10] = "Gitee：https://gitee.com/schreier/chrono-timer"
     for i = 1, table.getn(lines) do Print(lines[i]) end
 end
 
@@ -3176,6 +3229,101 @@ local function OpenSettings()
     end
     waterfall:Open(ADDON)
     if ApplySettingsColor then ApplySettingsColor() end
+end
+
+-- 检测是否存在独立的 ArchiTotem 插件（非 ChronoTimer 内嵌；ChronoTimer 插件名是 ChronoTimer）
+local function IsStandaloneArchiTotemPresent()
+    if IsAddOnLoaded and IsAddOnLoaded("ArchiTotem") then return true end
+    if GetAddOnInfo then
+        local _, _, _, enabled = GetAddOnInfo("ArchiTotem")
+        if enabled then return true end
+    end
+    return false
+end
+
+-- 应用「启用一键图腾」开关 + 冲突处理：
+-- 独立 ArchiTotem 存在时，内嵌版本一律停用（避免两套帧/OnUpdate 冲突报错，且不接管 /at，留给独立插件）；
+-- 否则按 db.enableArchiTotem 决定是否加载。PLAYER_LOGIN 调用，作为 OnLoad 停用的安全网。
+local function ApplyArchiTotemEnabled()
+    if IsStandaloneArchiTotemPresent() then
+        if ArchiTotemFrame then
+            ArchiTotemFrame:UnregisterAllEvents()
+            ArchiTotemFrame:Hide()
+            ArchiTotemFrame:SetScript("OnUpdate", nil)
+        end
+        return
+    end
+    if UnitClassToken("player") ~= "SHAMAN" then return end
+    if db.enableArchiTotem ~= false then return end
+    if ArchiTotemFrame then
+        ArchiTotemFrame:UnregisterAllEvents()
+        ArchiTotemFrame:Hide()
+        ArchiTotemFrame:SetScript("OnUpdate", nil)
+    end
+    if SlashCmdList then
+        SlashCmdList["ARCHITOTEM"] = function()
+            Print("一键图腾已在 ChronoTimer 设置中禁用，请到 设置 → 萨满 开启后 /reload")
+        end
+    end
+end
+
+-- 延迟执行（1.12 没有 C_Timer，用 OnUpdate 计时）：把独立插件检测弹框推迟到加载完全结束后，
+-- 避免在加载屏幕期间调用 GetAddOnInfo / 弹 StaticPopup 干扰 /reload 的加载进度条
+local function DelayRun(delay, func)
+    local f = CreateFrame("Frame")
+    local elapsed = 0
+    f:SetScript("OnUpdate", function()
+        elapsed = elapsed + arg1
+        if elapsed >= delay then
+            f:SetScript("OnUpdate", nil)
+            f:Hide()
+            func()
+        end
+    end)
+end
+
+-- 检测是否同时启用了独立的 ArchiTotem 插件，若是则提示禁用
+local archiTotemConflictChecked = false
+StaticPopupDialogs["CHRONOTIMER_ARCHITOTEM_DUPLICATE"] = {
+    text = "检测到你同时启用了独立的 ArchiTotem 插件。\nChronoTimer 已内置图腾大师（一键图腾），两者同时启用会出现两套图腾条。\n是否禁用独立的 ArchiTotem？（需重载界面）",
+    button1 = "禁用并 /reload",
+    button2 = "暂不处理",
+    OnAccept = function()
+        if DisableAddOn then DisableAddOn("ArchiTotem") end
+        if ReloadUI then ReloadUI() end
+    end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+    showAlert = 1,
+}
+
+-- 切换一键图腾启用状态：确认后写入配置并重载；取消则不改变原设置
+StaticPopupDialogs["CHRONOTIMER_ARCHITOTEM_TOGGLE"] = {
+    text = "切换一键图腾（ArchiTotem）的启用状态需要重载界面才能生效。\n是否现在重载？",
+    button1 = "是，重载",
+    button2 = "否",
+    OnAccept = function()
+        if pendingArchiTotem ~= nil then
+            db.enableArchiTotem = pendingArchiTotem
+            pendingArchiTotem = nil
+        end
+        if ReloadUI then ReloadUI() end
+    end,
+    OnCancel = function()
+        pendingArchiTotem = nil
+    end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+    showAlert = 1,
+}
+local function CheckStandaloneArchiTotem()
+    if archiTotemConflictChecked then return end
+    archiTotemConflictChecked = true
+    if IsStandaloneArchiTotemPresent() then
+        StaticPopup_Show("CHRONOTIMER_ARCHITOTEM_DUPLICATE")
+    end
 end
 
 local function Init()
@@ -3312,6 +3460,7 @@ npOK = CT.npOK
 
 local ev = CreateFrame("Frame")
 RegSafe(ev, "VARIABLES_LOADED")
+RegSafe(ev, "PLAYER_LOGIN")
 RegSafe(ev, "PLAYER_ENTERING_WORLD")
 RegSafe(ev, "PLAYER_AURAS_CHANGED")
 RegSafe(ev, "UNIT_AURA")
@@ -3663,6 +3812,12 @@ end
 ev:SetScript("OnEvent", function()
     if event == "VARIABLES_LOADED" then
         Init()
+
+    elseif event == "PLAYER_LOGIN" then
+        if initialized then
+            ApplyArchiTotemEnabled()
+            DelayRun(2, CheckStandaloneArchiTotem)
+        end
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         if initialized then
