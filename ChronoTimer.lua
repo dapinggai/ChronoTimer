@@ -118,6 +118,7 @@ local defaults = {
     iconSpacing  = 6,
     iconPerRow   = 8,
     iconTextSize = 0,
+    stackTextSize = 0,
     iconSecondMode = false,
     ccCenter     = true,
     ccSize       = 64,
@@ -423,6 +424,21 @@ local function ApplyBarSettings(id, isDebuff, spellId, name, fallback, classToke
     end
 end
 
+-- 计时条模式：层数数字改到图标左侧显示（CandyBar 默认居中盖在图标上）
+local function ApplyStackTextLayout(id)
+    if not candy or not candy.var then return end
+    local h = candy.var.handlers and candy.var.handlers[id]
+    local icon = h and h.frame and h.frame.icon
+    local fs = icon and icon.text
+    if not fs then return end
+    local hgt = icon:GetHeight() or 18
+    fs:ClearAllPoints()
+    fs:SetHeight(hgt)
+    fs:SetJustifyH("RIGHT")
+    fs:SetJustifyV("MIDDLE")
+    fs:SetPoint("RIGHT", icon, "LEFT", -2, 0)
+end
+
 local function ApplyStacksText(id, stacks)
     if not candy or not candy:IsCandyBarRegistered(id) then return end
     if stacks and stacks > 1 then
@@ -430,6 +446,7 @@ local function ApplyStacksText(id, stacks)
     else
         candy:SetIconText(id, "")
     end
+    ApplyStackTextLayout(id)
 end
 
 -- 目标身上是否仍有该光环（查不到数据时按“仍在”处理，避免误删）
@@ -2549,8 +2566,18 @@ local function BuildOptions()
                             if ChronoTimerIconMode then ChronoTimerIconMode:ApplySettings() end
                         end,
                     },
+                    stackTextSize = {
+                        name = "层数文字大小", type = "range", order = 6,
+                        desc = "图标角落层数数字的字号，0 表示跟随图标大小自动缩放",
+                        min = 0, max = 40, step = 1,
+                        get = function() return db.stackTextSize or 0 end,
+                        set = function(v)
+                            db.stackTextSize = v
+                            if ChronoTimerIconMode then ChronoTimerIconMode:ApplySettings() end
+                        end,
+                    },
                     iconSecondMode = {
-                        name = "以整秒显示倒计时", type = "toggle", order = 6,
+                        name = "以整秒显示倒计时", type = "toggle", order = 7,
                         desc = "开启后统一显示整秒数字；关闭时 60 秒以上显示分:秒，10 秒内显示一位小数",
                         get = function() return db.iconSecondMode end,
                         set = function(v)
@@ -2559,14 +2586,14 @@ local function BuildOptions()
                         end,
                     },
                     unlockIcon = {
-                        name = "解锁图标位置", type = "execute", order = 7,
+                        name = "解锁图标位置", type = "execute", order = 8,
                         desc = "点击后出现拖动框，拖好位置再次点击锁定",
                         func = function()
                             if ChronoTimerIconMode then ChronoTimerIconMode:ToggleUnlock() end
                         end,
                     },
                     resetIcon = {
-                        name = "重置图标位置", type = "execute", order = 8,
+                        name = "重置图标位置", type = "execute", order = 9,
                         func = function()
                             if ChronoTimerIconMode then ChronoTimerIconMode:ResetIconPosition() end
                         end,
@@ -3113,7 +3140,7 @@ local function SetupIntroText()
 
     local npLine = npOK and "|cff00ff00Nampower 已连接|r" or "|cffff0000未检测到 Nampower|r"
     fs:SetText(
-        "|cFF77BBFFChronoTimer 光环计时  v1.6.25|r\n" ..
+        "|cFF77BBFFChronoTimer 光环计时  v1.6.26|r\n" ..
         npLine .. "\n\n" ..
         "自身光环 / 图腾 / 多目标 HoT / DoT 计时\n" ..
         "HoT 左键补施 · 团队共享火焰易伤\n" ..
@@ -3196,7 +3223,7 @@ end
 
 local function PrintStatus()
     local lines = {}
-    lines[1] = "版本 1.6.25"
+    lines[1] = "版本 1.6.26"
     lines[2] = "Nampower：" .. (npOK and "已连接" or "未检测到")
     lines[3] = "依赖库：" ..
         "CandyBar=" .. (candy and "有" or "无") ..
@@ -3213,8 +3240,7 @@ local function PrintStatus()
         " GetUnitField=" .. (GetUnitField and "有" or "无") ..
         " GetPlayerBuffID=" .. (GetPlayerBuffID and "有" or "无")
     lines[8] = "存档：ChronoTimerDB" .. (type(ChronoTimerDB) == "table" and " 存在" or " 不存在")
-    lines[9] = "GitHub：https://github.com/dapinggai/ChronoTimer"
-    lines[10] = "Gitee：https://gitee.com/schreier/chrono-timer"
+    lines[9] = "更新地址：https://github.com/dapinggai/ChronoTimer"
     for i = 1, table.getn(lines) do Print(lines[i]) end
 end
 

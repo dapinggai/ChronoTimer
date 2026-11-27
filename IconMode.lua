@@ -12,12 +12,13 @@ local CC_WORDS = {
     "眩晕", "昏迷", "击晕", "闷棍", "凿击", "定身", "禁锢", "缠绕", "纠缠",
     "冰冻", "冰冻陷阱", "冰霜新星", "恐惧", "破胆怒吼", "魅惑", "变形", "睡眠", "沉睡", "蛛网",
     "肾击", "偷袭", "制裁之锤", "忏悔", "致盲", "心灵尖啸", "翼龙钉刺", "休眠",
+    "军团镣铐", "镣铐",
     "stun", "sap", "gouge", "root", "frost nova", "frostbite", "entangling",
     "polymorph", "fear", "charm", "sleep", "kidney shot", "cheap shot",
     "hammer of justice", "concussion blow", "bash", "pounce", "war stomp",
     "intercept", "feral charge", "web", "intimidating shout",
     "psychic scream", "blind", "repentance", "wyvern sting", "hibernate",
-    "death coil", "scare beast", "turn undead", "charge stun",
+    "death coil", "scare beast", "turn undead", "charge stun", "legion shackles",
 }
 
 local db, active
@@ -108,6 +109,8 @@ local function CountdownFontSize(iconSize)
 end
 
 local function StackFontSize(iconSize)
+    local v = db and db.stackTextSize or 0
+    if v and v > 0 then return v end
     return math.max(8, math.floor(CountdownFontSize(iconSize) * 0.65))
 end
 
@@ -118,7 +121,9 @@ local function CCTextFontSize(ccSize)
 end
 
 local function CCStackFontSize(ccSize)
-    return math.max(8, math.floor(CCTextFontSize(ccSize) * 0.65))
+    local v = db and db.stackTextSize or 0
+    if v and v > 0 then return v end
+    return 12
 end
 
 local function IsCCName(name)
@@ -269,7 +274,7 @@ local function CreateCC()
     ccIcon.icon:SetTexture(ICON_DEFAULT)
     ccIcon.stack = ccIcon:CreateFontString(nil, "OVERLAY")
     ccIcon.stack:SetPoint("BOTTOMRIGHT", ccIcon, "BOTTOMRIGHT", -2, 2)
-    SetFontSize(ccIcon.stack, 12)
+    SetFontSize(ccIcon.stack, CCStackFontSize(iconSize))
     ccIcon.stack:SetTextColor(1, 0.9, 0.3, 1)
     ccIcon.stack:SetShadowColor(0, 0, 0, 1)
     ccIcon.stack:SetShadowOffset(1, -1)
@@ -406,6 +411,9 @@ function IM:ApplySettings()
     -- 新版 CC 是固定尺寸矩形框，这里不再根据 db.ccSize 动态调整
     if ccFrame then
         StyleRedBars(db.ccSize or 64)
+    end
+    if ccIcon and ccIcon.stack then
+        SetFontSize(ccIcon.stack, CCStackFontSize(40))
     end
 
     self:Update(true)
