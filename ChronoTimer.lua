@@ -69,7 +69,6 @@ local defaults = {
     clickRecastHoT = true,
     trackFireVulnerability = true,
     trackBladeFlurry = true,   -- 盗贼：监控常驻 Buff「剑刃乱舞」
-    enableArchiTotem = true,   -- 萨满：是否加载内置一键图腾 ArchiTotem
     showEnergy   = true,
     showEnergyBar = true,
     showComboPoints = true,
@@ -141,7 +140,6 @@ local lastScan    = 0
 local pendingScan = false
 local initialized = false
 local npOK        = false
-local pendingArchiTotem  -- 萨满页切换一键图腾时的待确认目标值（确认后写入并重载）
 
 local anchor
 local minimapButton
@@ -1292,7 +1290,7 @@ local function ProcessAura(buffIndex, isDebuff, stamp)
     end
 end
 
--- ---------------- 萨满图腾（参考 ArchiTotem：常驻图腾 + 一键施放） ----------------
+-- ---------------- 萨满图腾（常驻图腾 + 施放计时） ----------------
 local TOTEM_SLOTS = 4
 local PERMANENT_TOTEM = 86400
 
@@ -1327,6 +1325,39 @@ for i = 1, table.getn(TOTEM_LIST) do
     local t = TOTEM_LIST[i]
     TOTEM_INFO[string.lower(t.en)] = t
     TOTEM_INFO[t.zh] = t
+end
+
+-- 图腾掌握天赋加成（+20% 持续时间）。剔除内置图腾助手后由计时模块自行检测，
+-- 不再依赖 ArchiTotem 的全局变量。挂在 CT 上避免占用文件的局部变量名额。
+CT.totemicMasteryBonus = 0
+function CT.UpdateTotemicMasteryBonus()
+    if UnitClassToken and UnitClassToken("player") ~= "SHAMAN" then
+        CT.totemicMasteryBonus = 0
+        return
+    end
+    if not GetNumTalentTabs or not GetNumTalents or not GetTalentInfo then
+        CT.totemicMasteryBonus = 0
+        return
+    end
+    local numTabs = GetNumTalentTabs() or 0
+    local has = false
+    for tab = 1, numTabs do
+        local n = GetNumTalents(tab) or 0
+        for i = 1, n do
+            local name, _, _, _, rank = GetTalentInfo(tab, i)
+            local ok = name and (
+                name == "Totemic Mastery" or name == "图腾掌握" or name == "图腾精通"
+                or (string.find(tostring(name), "Totem") and string.find(tostring(name), "Master"))
+                or (string.find(tostring(name), "图腾") and (string.find(tostring(name), "掌") or string.find(tostring(name), "精通") or string.find(tostring(name), "统御")))
+            )
+            if ok and (rank or 0) > 0 then
+                has = true
+                break
+            end
+        end
+        if has then break end
+    end
+    CT.totemicMasteryBonus = has and 0.20 or 0
 end
 
 -- ---------------- 术士：奴役恶魔（恶魔叛变倒计时） ----------------
@@ -1411,12 +1442,12 @@ local function ProcessTotem(slot, now, seen)
     local permanent = false
     local useCast = false
     if cast then
-        -- 与「一键图腾管理」保持一致：倒计时按施放时刻 + 表中时长推算
+        -- 倒计时按施放时刻 + 表中时长推算
         useCast = true
         if not cast.permanent then
             local castDuration = cast.duration
-            if castDuration and ArchiTotem_TotemicMasteryBonus and ArchiTotem_TotemicMasteryBonus > 0 then
-                castDuration = castDuration * (1 + ArchiTotem_TotemicMasteryBonus)
+            if castDuration and CT.totemicMasteryBonus and CT.totemicMasteryBonus > 0 then
+                castDuration = castDuration * (1 + CT.totemicMasteryBonus)
             end
             local left = cast.started + (castDuration or 0) - now
             if left <= 0 then
@@ -1449,18 +1480,13 @@ local function ProcessTotem(slot, now, seen)
     if type(icon) ~= "string" or icon == "" then
         icon = (info and info.icon) or "Interface\\Icons\\INV_Misc_QuestionMark"
     end
-    -- 时长统一按「一键图腾管理」(ArchiTotem) 的图腾数据，保证两处倒计时一致
-    if not permanent and info and type(ArchiTotem_TotemData) == "table" then
-        for _, d in pairs(ArchiTotem_TotemData) do
-            if d.name == info.en and type(d.duration) == "number" and d.duration > 0 then
-                duration = d.duration
-                break
-            end
-        end
+    -- 时长以内置图腾表为准（部分客户端 GetTotemInfo 返回值不准）
+    if not permanent and info and type(info.duration) == "number" and info.duration > 0 then
+        duration = info.duration
     end
-    -- 图腾掌握天赋会延长持续时间，一键图腾管理的倒计时同样按此加成计算
-    if not permanent and duration and ArchiTotem_TotemicMasteryBonus and ArchiTotem_TotemicMasteryBonus > 0 then
-        duration = duration * (1 + ArchiTotem_TotemicMasteryBonus)
+    -- 图腾掌握天赋延长持续时间
+    if not permanent and duration and CT.totemicMasteryBonus and CT.totemicMasteryBonus > 0 then
+        duration = duration * (1 + CT.totemicMasteryBonus)
     end
 
     local remain
@@ -2804,31 +2830,6 @@ local function BuildOptions()
                             end
                         end,
                     },
-                    enableArchiTotem = {
-                        name = "启用一键图腾（ArchiTotem）", type = "toggle", order = 2,
-                        desc = "内置图腾大师：四系图腾条 / 一键召唤 / 召回 / 预设。切换启用状态会弹出重载提示，确认后生效；若检测到独立 ArchiTotem 插件，内嵌版将自动停用以避免冲突",
-                        get = function() return db.enableArchiTotem ~= false end,
-                        set = function(v)
-                            -- 状态未变则不处理；变化时弹确认框，按“是”才写入并重载，按“否”保持原值
-                            if (db.enableArchiTotem ~= false) == v then return end
-                            pendingArchiTotem = v
-                            StaticPopup_Show("CHRONOTIMER_ARCHITOTEM_TOGGLE")
-                        end,
-                    },
-                    archiCmdHeader = {
-                        name = "ArchiTotem 使用命令", type = "header", order = 3,
-                    },
-                    archiCmdPrint = {
-                        name = "打印 /at 全部命令到聊天框", type = "execute", order = 4,
-                        desc = "把一键图腾的全部斜杠命令打印到聊天框（也可直接输入 /at 查看）。常用：/at cast 一键召唤、/at recall 召回、/at preset 预设、/at scale 缩放、/at reset 重置位置",
-                        func = function()
-                            if ArchiTotem_ShowCommandHelp then
-                                ArchiTotem_ShowCommandHelp()
-                            else
-                                Print("图腾助手未加载")
-                            end
-                        end,
-                    },
                 },
             },
             rogue = {
@@ -2844,220 +2845,6 @@ local function BuildOptions()
                                 ScanAuras(true)
                             elseif active["bladeflurry"] then
                                 RemoveBar("bladeflurry")
-                            end
-                        end,
-                    },
-                },
-            },
-            totem = {
-                name = hcolor .. "图腾栏", type = "group", order = 40,
-                args = {
-                    totemScale = {
-                        name = "图标缩放", type = "range", order = 1,
-                        desc = "内置 ArchiTotem 图腾按钮的大小（仅萨满祭司生效）",
-                        min = 0.3, max = 2.0, step = 0.05,
-                        get = function()
-                            local o = ArchiTotem_Options
-                            if o and o.Apperance then return o.Apperance.scale or 1 end
-                            return 1
-                        end,
-                        set = function(v)
-                            if ArchiTotem_Options and ArchiTotem_SetScale then
-                                ArchiTotem_SetScale(v)
-                            end
-                        end,
-                    },
-                    totemDirection = {
-                        name = "排列方向", type = "text", order = 2,
-                        desc = "图腾按钮的展开方向",
-                        validate = { "向上", "向下" },
-                        columns = 1,
-                        get = function()
-                            local o = ArchiTotem_Options
-                            if o and o.Apperance and o.Apperance.direction == "down" then
-                                return "向下"
-                            end
-                            return "向上"
-                        end,
-                        set = function(v)
-                            if ArchiTotem_Options and ArchiTotem_SetDirection then
-                                ArchiTotem_SetDirection(v == "向下" and "down" or "up")
-                            end
-                        end,
-                    },
-                    totemLock = {
-                        name = "锁定图腾栏", type = "toggle", order = 3,
-                        desc = "锁定后隐藏拖拽手柄，避免误拖；解锁后可用手柄拖动位置",
-                        get = function()
-                            local o = ArchiTotem_Options
-                            return o and o.locked and true or false
-                        end,
-                        set = function(v)
-                            if not ArchiTotem_Options then return end
-                            ArchiTotem_Options.locked = v
-                            if ArchiTotem_UpdateDragHandleVisibility then
-                                ArchiTotem_UpdateDragHandleVisibility()
-                            end
-                        end,
-                    },
-                    totemHoverAll = {
-                        name = "悬停显示全部图腾", type = "toggle", order = 4,
-                        desc = "开启后鼠标移上去展开该系全部图腾；关闭则只显示一个",
-                        get = function()
-                            local o = ArchiTotem_Options
-                            return o and o.Apperance and o.Apperance.allonmouseover == true
-                        end,
-                        set = function(v)
-                            local o = ArchiTotem_Options
-                            if o and o.Apperance then o.Apperance.allonmouseover = v end
-                        end,
-                    },
-                    totemBottomCast = {
-                        name = "施放后贴底对齐", type = "toggle", order = 5,
-                        desc = "施放图腾后按钮移到最底部，方便看出哪些已就绪",
-                        get = function()
-                            local o = ArchiTotem_Options
-                            if o and o.Apperance and o.Apperance.bottomoncast ~= nil then
-                                return o.Apperance.bottomoncast == true
-                            end
-                            return true
-                        end,
-                        set = function(v)
-                            local o = ArchiTotem_Options
-                            if o and o.Apperance then o.Apperance.bottomoncast = v end
-                        end,
-                    },
-                    totemTimers = {
-                        name = "显示数字倒计时", type = "toggle", order = 6,
-                        desc = "在按钮上显示剩余时间的数字",
-                        get = function()
-                            local o = ArchiTotem_Options
-                            if o and o.Apperance and o.Apperance.shownumericcooldowns ~= nil then
-                                return o.Apperance.shownumericcooldowns == true
-                            end
-                            return true
-                        end,
-                        set = function(v)
-                            local o = ArchiTotem_Options
-                            if not (o and o.Apperance) then return end
-                            o.Apperance.shownumericcooldowns = v
-                            if v then return end
-                            if ArchiTotem_TotemData then
-                                for k, d in pairs(ArchiTotem_TotemData) do
-                                    local a = _G[k .. "CooldownText"]
-                                    if a then a:Hide() end
-                                    local b = _G[k .. "CooldownBg"]
-                                    if b then b:Hide() end
-                                    d.cooldownstarted = nil
-                                end
-                            end
-                            if ArchiTotemActiveTotem then
-                                for k in pairs(ArchiTotemActiveTotem) do
-                                    local t = _G[k .. "DurationText"]
-                                    if t then t:Hide() end
-                                end
-                            end
-                        end,
-                    },
-                    totemTooltips = {
-                        name = "显示鼠标提示", type = "toggle", order = 7,
-                        desc = "鼠标移到图腾按钮上时显示法术说明",
-                        get = function()
-                            local o = ArchiTotem_Options
-                            if o and o.Apperance and o.Apperance.showtooltips ~= nil then
-                                return o.Apperance.showtooltips == true
-                            end
-                            return true
-                        end,
-                        set = function(v)
-                            local o = ArchiTotem_Options
-                            if o and o.Apperance then o.Apperance.showtooltips = v end
-                        end,
-                    },
-                    totemEarthShown = {
-                        name = "大地图腾显示数", type = "range", order = 8,
-                        desc = "平时显示几个大地图腾按钮",
-                        min = 1, max = 5, step = 1,
-                        get = function()
-                            local o = ArchiTotem_Options
-                            return (o and o.Ear and o.Ear.shown) or 1
-                        end,
-                        set = function(v)
-                            local o = ArchiTotem_Options
-                            if not (o and o.Ear) then return end
-                            o.Ear.shown = v
-                            if ArchiTotem_UpdateShown then ArchiTotem_UpdateShown() end
-                        end,
-                    },
-                    totemFireShown = {
-                        name = "火焰图腾显示数", type = "range", order = 9,
-                        desc = "平时显示几个火焰图腾按钮",
-                        min = 1, max = 5, step = 1,
-                        get = function()
-                            local o = ArchiTotem_Options
-                            return (o and o.Fir and o.Fir.shown) or 1
-                        end,
-                        set = function(v)
-                            local o = ArchiTotem_Options
-                            if not (o and o.Fir) then return end
-                            o.Fir.shown = v
-                            if ArchiTotem_UpdateShown then ArchiTotem_UpdateShown() end
-                        end,
-                    },
-                    totemWaterShown = {
-                        name = "水图腾显示数", type = "range", order = 10,
-                        desc = "平时显示几个水图腾按钮",
-                        min = 1, max = 5, step = 1,
-                        get = function()
-                            local o = ArchiTotem_Options
-                            return (o and o.Wat and o.Wat.shown) or 1
-                        end,
-                        set = function(v)
-                            local o = ArchiTotem_Options
-                            if not (o and o.Wat) then return end
-                            o.Wat.shown = v
-                            if ArchiTotem_UpdateShown then ArchiTotem_UpdateShown() end
-                        end,
-                    },
-                    totemAirShown = {
-                        name = "空气图腾显示数", type = "range", order = 11,
-                        desc = "平时显示几个空气图腾按钮",
-                        min = 1, max = 7, step = 1,
-                        get = function()
-                            local o = ArchiTotem_Options
-                            return (o and o.Air and o.Air.shown) or 1
-                        end,
-                        set = function(v)
-                            local o = ArchiTotem_Options
-                            if not (o and o.Air) then return end
-                            o.Air.shown = v
-                            if ArchiTotem_UpdateShown then ArchiTotem_UpdateShown() end
-                        end,
-                    },
-                    totemPreset = {
-                        name = "打开预设管理", type = "execute", order = 20,
-                        desc = "保存 / 读取整套图腾组合",
-                        func = function()
-                            if ArchiTotem_TogglePresetManager then
-                                ArchiTotem_TogglePresetManager()
-                            end
-                        end,
-                    },
-                    totemCoverage = {
-                        name = "查看图腾覆盖", type = "execute", order = 21,
-                        desc = "查看每个图腾等级覆盖的技能范围",
-                        func = function()
-                            if ArchiTotem_ToggleCoverageWindow then
-                                ArchiTotem_ToggleCoverageWindow()
-                            end
-                        end,
-                    },
-                    totemResetPos = {
-                        name = "重置图腾栏位置", type = "execute", order = 22,
-                        desc = "把图腾栏移回屏幕中央",
-                        func = function()
-                            if ArchiTotem_ResetFramePosition then
-                                ArchiTotem_ResetFramePosition()
                             end
                         end,
                     },
@@ -3081,10 +2868,9 @@ local function BuildOptions()
         },
     }
 
-    -- 图腾助手仅萨满可用：其他职业直接移除该分类，
-    -- 避免调用到未初始化的 ArchiTotem 数据而报错
+    -- 萨满专属页：仅萨满可见
     if UnitClassToken("player") ~= "SHAMAN" then
-        options.args.totem = nil
+        options.args.shaman = nil
     end
 
     -- 能量 / 连击点仅盗贼与小德可用：其他职业移除该分类
@@ -3096,13 +2882,6 @@ local function BuildOptions()
     -- 恶魔叛变倒计时仅术士可用：其他职业移除该分类
     if UnitClassToken("player") ~= "WARLOCK" then
         options.args.warlock = nil
-    end
-
-    -- 萨满专属页：仅萨满可见；若已禁用一键图腾，则同时隐藏「图腾栏」外观配置
-    if UnitClassToken("player") ~= "SHAMAN" then
-        options.args.shaman = nil
-    elseif db.enableArchiTotem == false then
-        options.args.totem = nil
     end
 
     -- 盗贼专属页：仅盗贼可见
@@ -3140,12 +2919,12 @@ local function SetupIntroText()
 
     local npLine = npOK and "|cff00ff00Nampower 已连接|r" or "|cffff0000未检测到 Nampower|r"
     fs:SetText(
-        "|cFF77BBFFChronoTimer 光环计时  v1.6.26|r\n" ..
+        "|cFF77BBFFChronoTimer 光环计时  v1.6.27|r\n" ..
         npLine .. "\n\n" ..
         "自身光环 / 图腾 / 多目标 HoT / DoT 计时\n" ..
         "HoT 左键补施 · 团队共享火焰易伤\n" ..
         "/ct 设置 · /ct list 名单\n" ..
-        "/ct ignore 忽略 · /ct totem 图腾\n" ..
+        "/ct ignore 忽略\n" ..
         "拖动锚点可移动计时条\n" ..
         "仓库 github.com/dapinggai/ChronoTimer"
     )
@@ -3223,7 +3002,7 @@ end
 
 local function PrintStatus()
     local lines = {}
-    lines[1] = "版本 1.6.26"
+    lines[1] = "版本 1.6.27"
     lines[2] = "Nampower：" .. (npOK and "已连接" or "未检测到")
     lines[3] = "依赖库：" ..
         "CandyBar=" .. (candy and "有" or "无") ..
@@ -3257,100 +3036,6 @@ local function OpenSettings()
     if ApplySettingsColor then ApplySettingsColor() end
 end
 
--- 检测是否存在独立的 ArchiTotem 插件（非 ChronoTimer 内嵌；ChronoTimer 插件名是 ChronoTimer）
-local function IsStandaloneArchiTotemPresent()
-    if IsAddOnLoaded and IsAddOnLoaded("ArchiTotem") then return true end
-    if GetAddOnInfo then
-        local _, _, _, enabled = GetAddOnInfo("ArchiTotem")
-        if enabled then return true end
-    end
-    return false
-end
-
--- 应用「启用一键图腾」开关 + 冲突处理：
--- 独立 ArchiTotem 存在时，内嵌版本一律停用（避免两套帧/OnUpdate 冲突报错，且不接管 /at，留给独立插件）；
--- 否则按 db.enableArchiTotem 决定是否加载。PLAYER_LOGIN 调用，作为 OnLoad 停用的安全网。
-local function ApplyArchiTotemEnabled()
-    if IsStandaloneArchiTotemPresent() then
-        if ArchiTotemFrame then
-            ArchiTotemFrame:UnregisterAllEvents()
-            ArchiTotemFrame:Hide()
-            ArchiTotemFrame:SetScript("OnUpdate", nil)
-        end
-        return
-    end
-    if UnitClassToken("player") ~= "SHAMAN" then return end
-    if db.enableArchiTotem ~= false then return end
-    if ArchiTotemFrame then
-        ArchiTotemFrame:UnregisterAllEvents()
-        ArchiTotemFrame:Hide()
-        ArchiTotemFrame:SetScript("OnUpdate", nil)
-    end
-    if SlashCmdList then
-        SlashCmdList["ARCHITOTEM"] = function()
-            Print("一键图腾已在 ChronoTimer 设置中禁用，请到 设置 → 萨满 开启后 /reload")
-        end
-    end
-end
-
--- 延迟执行（1.12 没有 C_Timer，用 OnUpdate 计时）：把独立插件检测弹框推迟到加载完全结束后，
--- 避免在加载屏幕期间调用 GetAddOnInfo / 弹 StaticPopup 干扰 /reload 的加载进度条
-local function DelayRun(delay, func)
-    local f = CreateFrame("Frame")
-    local elapsed = 0
-    f:SetScript("OnUpdate", function()
-        elapsed = elapsed + arg1
-        if elapsed >= delay then
-            f:SetScript("OnUpdate", nil)
-            f:Hide()
-            func()
-        end
-    end)
-end
-
--- 检测是否同时启用了独立的 ArchiTotem 插件，若是则提示禁用
-local archiTotemConflictChecked = false
-StaticPopupDialogs["CHRONOTIMER_ARCHITOTEM_DUPLICATE"] = {
-    text = "检测到你同时启用了独立的 ArchiTotem 插件。\nChronoTimer 已内置图腾大师（一键图腾），两者同时启用会出现两套图腾条。\n是否禁用独立的 ArchiTotem？（需重载界面）",
-    button1 = "禁用并 /reload",
-    button2 = "暂不处理",
-    OnAccept = function()
-        if DisableAddOn then DisableAddOn("ArchiTotem") end
-        if ReloadUI then ReloadUI() end
-    end,
-    timeout = 0,
-    whileDead = 1,
-    hideOnEscape = 1,
-    showAlert = 1,
-}
-
--- 切换一键图腾启用状态：确认后写入配置并重载；取消则不改变原设置
-StaticPopupDialogs["CHRONOTIMER_ARCHITOTEM_TOGGLE"] = {
-    text = "切换一键图腾（ArchiTotem）的启用状态需要重载界面才能生效。\n是否现在重载？",
-    button1 = "是，重载",
-    button2 = "否",
-    OnAccept = function()
-        if pendingArchiTotem ~= nil then
-            db.enableArchiTotem = pendingArchiTotem
-            pendingArchiTotem = nil
-        end
-        if ReloadUI then ReloadUI() end
-    end,
-    OnCancel = function()
-        pendingArchiTotem = nil
-    end,
-    timeout = 0,
-    whileDead = 1,
-    hideOnEscape = 1,
-    showAlert = 1,
-}
-local function CheckStandaloneArchiTotem()
-    if archiTotemConflictChecked then return end
-    archiTotemConflictChecked = true
-    if IsStandaloneArchiTotemPresent() then
-        StaticPopup_Show("CHRONOTIMER_ARCHITOTEM_DUPLICATE")
-    end
-end
 
 local function Init()
     if initialized then return end
@@ -3407,14 +3092,6 @@ local function Init()
                 ChronoTimerIconMode:DebugCC()
             else
                 Print("图标模块尚未初始化")
-            end
-        elseif msg == "totem" or msg == "图腾" then
-            if UnitClassToken("player") ~= "SHAMAN" then
-                Print("图腾助手仅萨满祭司可用，当前职业已跳过")
-            elseif ArchiTotem_Command and ArchiTotem_Options then
-                ArchiTotem_Command("")
-            else
-                Print("图腾助手未加载")
             end
         else
             OpenSettings()
@@ -3492,6 +3169,9 @@ RegSafe(ev, "PLAYER_AURAS_CHANGED")
 RegSafe(ev, "UNIT_AURA")
 RegSafe(ev, "ZONE_CHANGED_NEW_AREA")
 RegSafe(ev, "PLAYER_DEAD")
+-- 萨满图腾掌握天赋：登录时与天赋变更后重新检测加成
+RegSafe(ev, "PLAYER_TALENT_UPDATE")
+RegSafe(ev, "CHARACTER_POINTS_CHANGED")
 
 -- Nampower 施法成功事件：用于识别一键释放/常驻图腾
 if CT.npOK then
@@ -3840,18 +3520,19 @@ ev:SetScript("OnEvent", function()
         Init()
 
     elseif event == "PLAYER_LOGIN" then
-        if initialized then
-            ApplyArchiTotemEnabled()
-            DelayRun(2, CheckStandaloneArchiTotem)
-        end
+        if initialized then CT.UpdateTotemicMasteryBonus() end
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         if initialized then
             ClearAll()
             ScanAuras(true)
+            CT.UpdateTotemicMasteryBonus()
         else
             Init()   -- 依赖库加载较慢时再尝试一次
         end
+
+    elseif event == "PLAYER_TALENT_UPDATE" or event == "CHARACTER_POINTS_CHANGED" then
+        if initialized then CT.UpdateTotemicMasteryBonus() end
 
     elseif event == "PLAYER_AURAS_CHANGED" then
         if initialized then ScanAuras(false) end

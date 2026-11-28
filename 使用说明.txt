@@ -1,4 +1,4 @@
-ChronoTimer 光环计时  v1.6.26
+ChronoTimer 光环计时  v1.6.27
 作者：灵灵漆
 仓库：https://github.com/dapinggai/ChronoTimer
 原作：Chronometer（原作者 Bhattu，后续修复 laytya、dein0s、武藤纯子酱、Sunelegy）
@@ -18,12 +18,10 @@ ChronoTimer 光环计时  v1.6.26
 
 3. 选择要显示的内容
    常规 → 勾选「显示 Buff」「显示 Debuff」。
-   萨满 → 「萨满」页勾选「显示图腾」，还可开关「启用一键图腾（ArchiTotem）」
-        （默认开启；关闭后隐藏图腾栏，/at 失效，重开需 /reload）；
-        页面内可「打印 /at 全部命令到聊天框」查阅一键图腾用法。
+   萨满 → 「萨满」页勾选「显示图腾」，显示自己图腾的剩余时间；
+        图腾掌握天赋（+20% 持续时间）自动识别并计入倒计时。
    盗贼 → 「盗贼」页可开关「监控剑刃乱舞」（默认开启）：该 Buff 持续到取消、
         无剩余时间，激活时显示「常驻」计时条 / 图标（无倒计时），取消后自动隐藏。
-   若插件列表同时启用了独立的 ArchiTotem，登录会提示禁用（ChronoTimer 已内置）。
    可设置「最短 / 最长显示时长」过滤过短或过长的光环，
    例如最长填 300，长时间祝福就不会占屏。
 
@@ -121,4 +119,4 @@ ChronoTimer 光环计时  v1.6.26
 · 盗贼割裂的剩余时间按连击点（8～16 秒）自动换算，并叠加「血腥气息」天赋（1 级 +4 秒、2 级 +6 秒）
 · 盗贼肾击的剩余时间按 1 秒 + 1 秒 × 连击点显示（5 星 = 6 秒）
 · 计时条模式下，自身 Debuff 的背景固定为暗红，和 Buff、目标 Debuff 区分
-· 想清空配置，删除 WTF\Account\<账号>\SavedVariables\ChronoTimer.lua
+· 想清空配置，删除 WTF\Account\<账号>\<服务器>\<角色>\SavedVariables\ChronoTimer.lua

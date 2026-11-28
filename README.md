@@ -3,7 +3,7 @@
 **Turtle WoW (1.12) aura / totem / HoT / DoT timer addon.**
 乌龟服光环计时插件，界面沿用 Chronometer，需 Nampower 支持（UI based on Chronometer, requires Nampower）。
 
-- 版本：1.6.26
+- 版本：1.6.27
 - 作者：灵灵漆
 - 语言：Lua（WoW 1.12 插件）
 - 仓库：https://github.com/dapinggai/ChronoTimer
@@ -14,7 +14,7 @@
 
 适用于《乌龟服》(Turtle WoW) 1.12 客户端。ChronoTimer 基于 Chronometer 重构，用来显示自身 Buff / Debuff、图腾、多目标 HoT / DoT 以及团队共享火焰易伤的剩余时间。
 
-- 版本：1.6.26
+- 版本：1.6.27
 - 作者：灵灵漆
 - 仓库：https://github.com/dapinggai/ChronoTimer
 - 原作：Chronometer（原作者 Bhattu，后续修复 laytya、dein0s、武藤纯子酱、Sunelegy）
@@ -233,12 +233,9 @@
 
 | 选项 | 说明 |
 | --- | --- |
-| 显示图腾 | 显示自己已施放图腾的剩余时间 |
-| 启用一键图腾（ArchiTotem） | 默认开启。内置图腾大师（四系图腾条 / 一键召唤 / 召回 / 预设）。关闭后立即隐藏图腾栏并停用，`/at` 命令失效；重新开启需 /reload 生效。关闭时「图腾栏」外观配置分类也会自动隐藏 |
-| 打印 /at 全部命令到聊天框 | 点击把一键图腾的全部斜杠命令打印到聊天框（也可直接输入 `/at` 或 `/ct totem`） |
+| 显示图腾 | 显示自己已施放图腾的剩余持续时间；图腾掌握天赋（+20% 持续时间）自动识别并计入倒计时 |
 
-- 常用命令：`/at cast` 一键召唤、`/at recall` 召回、`/at preset` 预设、`/at scale` 缩放、`/at reset` 重置位置、`/at` 查看全部。
-- 冲突检测：若插件列表中同时启用了独立的 ArchiTotem 插件，登录时会弹出提示，确认后自动禁用独立插件并 /reload（ChronoTimer 已内置图腾大师，两者同时启用会出现两套图腾条）。
+> 已移除内置图腾助手（ArchiTotem）与「图腾栏」外观配置，仅保留图腾计时功能。
 
 **盗贼**
 
@@ -296,7 +293,7 @@
 点击「重置位置」恢复默认，再用「显示/隐藏拖动锚点」重新拖动即可。自身 Buff 向下、目标 Debuff 向上，两者以锚点为分界，不会互相重叠。
 
 **Q：想恢复默认设置？**
-退出游戏后删除 `World of Warcraft\WTF\Account\<账号>\SavedVariables\ChronoTimer.lua`，或在设置中逐项调整。
+退出游戏后删除 `World of Warcraft\WTF\Account\<账号>\<服务器>\<角色>\SavedVariables\ChronoTimer.lua`，或在设置中逐项调整。
 
 **Q：开启了图标模式，但屏幕上没有图标？**
 1. 确认「使用图标显示」已勾选，且「显示 Buff」「显示 Debuff」（常规）与「显示图腾」（萨满页）处于开启状态；

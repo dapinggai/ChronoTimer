@@ -3,24 +3,12 @@
 ## Title-zhCN: |cff33ffcc[辅助]|r ChronoTimer 光环计时
 ## Notes: Refactored from Chronometer (original by Bhattu) for Turtle WoW; UI based on Chronometer. Shows your own auras, totems, multi-target HoTs/DoTs and shared Fire Vulnerability (requires Nampower)
 ## Notes-zhCN: Chronometer 重构版（原作者 Bhattu，后续修复 laytya、dein0s、武藤纯子酱、Sunelegy）：显示自身 Buff / Debuff、图腾、多目标 HoT / DoT 与团队共享火焰易伤，界面沿用 Chronometer（需 Nampower）
-## Version: 1.6.26
+## Version: 1.6.27
 ## Author: 灵灵漆
 ## OptionalDeps: !Libs
-## SavedVariables: ChronoTimerDB, ArchiTotem_Options
+## SavedVariablesPerCharacter: ChronoTimerDB
 ## X-Category: Combat
 
 ChronoTimer.lua
 IconMode.lua
 Energy.lua
-
-ArchiTotem\Locale\Localization.xml
-ArchiTotem\Data\Data.lua
-ArchiTotem\Data\Core.lua
-ArchiTotem\Data\UI.lua
-ArchiTotem\Data\Presets.lua
-ArchiTotem\Data\PresetManager.lua
-ArchiTotem\Data\KeyBindings.lua
-ArchiTotem\Data\Commands.lua
-ArchiTotem\Data\Coverage.lua
-ArchiTotem\ArchiTotem.xml
-ArchiTotem\Data\PfUISkin.lua

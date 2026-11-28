@@ -856,3 +856,37 @@ ChronoTimer 更新说明
 
 三、升级注意事项
 · 覆盖 ChronoTimer.lua、IconMode.lua 后 /reload 即可，配置无需迁移。
+========================================
+版本：1.6.27（2026-11-27）
+作者：灵灵漆
+========================================
+
+一、配置改为按角色独立保存
+· toc 中 `SavedVariables` 改为 `SavedVariablesPerCharacter`，`ChronoTimerDB` 按角色存储。
+· 同一账号下不同角色的设置互不影响，调整一个角色不再改动其他角色。
+· 存档位置从 `WTF\Account\<账号>\SavedVariables\ChronoTimer.lua` 变为
+  `WTF\Account\<账号>\<服务器>\<角色>\SavedVariables\ChronoTimer.lua`。
+· 注意：旧的账号级存档不会自动迁移，各角色首次上线使用默认配置；
+  如需保留原设置，手动把旧的账号级 `ChronoTimer.lua` 复制到对应角色目录下即可。
+
+二、移除内置图腾助手，仅保留图腾计时
+· 剔除完整内置的 ArchiTotem 图腾大师（四系图腾条 / 一键召唤 / 召回 / 预设 / 外观配置），
+  删除 ChronoTimer\ArchiTotem\ 整个目录及 toc 中的全部加载项，不再随插件加载。
+· 设置面板移除「启用一键图腾（ArchiTotem）」开关、ArchiTotem 命令帮助按钮与整个
+  「图腾栏」外观配置分类；移除 /ct totem 命令与独立 ArchiTotem 冲突检测弹窗。
+· 图腾计时功能完全保留：萨满页的「显示图腾」开关仍正常工作，倒计时、常驻图腾、
+  图腾召回清除等逻辑不变。
+
+三、图腾计时改为不依赖 ArchiTotem 数据
+· 时长改以内置图腾表（TOTEM_INFO）为准，不再读取 ArchiTotem_TotemData。
+· 图腾掌握天赋（+20% 持续时间）改为计时模块自行扫描天赋检测（CT.UpdateTotemicMasteryBonus），
+  登录时与天赋变更后自动刷新，不再依赖 ArchiTotem_TotemicMasteryBonus 全局变量。
+
+四、存档
+· toc 的 SavedVariablesPerCharacter 仅保留 ChronoTimerDB，移除 ArchiTotem_Options。
+· 旧角色存档里残留的 enableArchiTotem / ArchiTotem_Options 字段不再被读取，无害；
+  如需彻底清理，删除对应角色目录下的 ChronoTimer.lua 后重新配置即可。
+
+五、升级注意事项
+· 覆盖全部文件后 /reload 即可。原本依赖图腾助手一键召唤的玩家，请改用独立图腾插件
+  （如 ArchiTotem 单独启用）或系统动作条，计时条侧不受影响。
